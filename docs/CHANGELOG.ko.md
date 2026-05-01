@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### 수정
+- **앱 launch 가 CLI parent 종료 후 silent 사망하던 문제 해결.** Doomed FreeRDP 가 설명 없이 사라지는 경로 2가지: (1) `stderr=subprocess.PIPE` 가 parent 프로세스에 read-end 를 남겨서, CLI 종료 후 다음 stderr 쓰기에서 SIGPIPE → detached 클라이언트 사망. 이제 stderr 를 `$XDG_RUNTIME_DIR/<app>.stderr` 파일로 기록 — 세션이 parent 보다 오래 살고 tail 도 inspect 가능; `RDPSession.stderr_tail` 은 그 파일의 마지막 2KB 를 lazy 하게 읽어서 기존 caller interface 유지. (2) `$DISPLAY` 없는 순수 Wayland 세션에서 `xfreerdp` (RAIL 동작하는 유일한 클라이언트 — `sdl-freerdp` 는 RAIL 없음 (FreeRDP #9078), `wlfreerdp` 는 deprecated 에 RAIL repaint 깨짐) 가 detach 후 "failed to open display" 로 사망. `launch_app` 이 이제 그 조합을 거부하고 명확한 에러로 XWayland (compositor 내장 또는 niri / river 는 `xwayland-satellite`) 를 안내. (Thanks @Mic92 — PR #64.)
 - **`is_freerdp_pid()` 가 무관한 프로세스를 live RDP 세션으로 잘못 인식하던 거 해결.** 이전엔 `/proc/<pid>/cmdline` 안 어디든 `b"freerdp"` 또는 `b"xfreerdp"` 부분 문자열만 있으면 매치 — `~/freerdp-notes/run.sh` 같은 경로의 스크립트, `--deselect=test_freerdp_pid` 인자 가진 pytest 호출, 또는 어쩌다 인자에 freerdp 언급한 도구까지 다 잡혀서, winpodx 가 그것들을 본인이 spawn 한 FreeRDP 로 착각해 stale `.cproc` 마커가 영원히 reap 안 됐음. 이제 cmdline 을 null-byte 로 파싱해서 argv[0] basename 만 검사 — `find_freerdp()` 가 실제로 실행하는 바이너리들 (`xfreerdp{,3}`, `sdl-freerdp{,3}`, `flatpak run com.freerdp.FreeRDP` 폴백) 과만 매치. 부분문자열 매치로 새던 케이스 2개에 대한 회귀 테스트 추가. 하위 PID-reuse 테스트는 `bash -c "exec -a … sleep 30"` 없이 다시 작성 — 멀티콜 coreutils 환경에서도 안 깨짐. (Thanks @Mic92 — PR #63.)
 
 ### 변경
