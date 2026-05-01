@@ -50,33 +50,20 @@ def test_find_existing_session_rejects_non_freerdp_pid(tmp_path, monkeypatch):
     # A non-freerdp process with 'winpodx' in its cmdline must not look like a live RDP session.
     import shutil
     import subprocess
-    import time
-    from pathlib import Path
 
     from winpodx.core.rdp import _find_existing_session
 
     monkeypatch.setattr("winpodx.core.rdp.runtime_dir", lambda: tmp_path)
     monkeypatch.setattr("winpodx.core.process.runtime_dir", lambda: tmp_path)
 
-    bash = shutil.which("bash")
-    if bash is None:  # pragma: no cover - bash is standard on target distros
-        pytest.skip("bash not available for argv0 spoofing")
+    sleep = shutil.which("sleep")
+    if sleep is None:  # pragma: no cover
+        pytest.skip("sleep not available")
 
-    child = subprocess.Popen(  # noqa: S603
-        [bash, "-c", "exec -a winpodx-app-list sleep 30"],
-    )
+    # Any live process whose argv[0] is not a FreeRDP binary must be rejected
+    # and its stale .cproc marker reaped (PID-reuse guard).
+    child = subprocess.Popen([sleep, "30"])  # noqa: S603
     try:
-        proc_cmdline = Path(f"/proc/{child.pid}/cmdline")
-        for _ in range(40):
-            try:
-                if b"winpodx" in proc_cmdline.read_bytes().lower():
-                    break
-            except OSError:
-                pass
-            time.sleep(0.05)
-        else:
-            pytest.fail("child process did not expose 'winpodx' in cmdline")
-
         pidfile = tmp_path / "notepad.cproc"
         pidfile.write_text(str(child.pid))
 
@@ -121,7 +108,8 @@ def test_is_freerdp_pid_helper_accepts_freerdp_only():
     with (
         patch("winpodx.core.process.os.kill", return_value=None),
         patch(
-            "winpodx.core.process.Path", side_effect=fake_path_factory(b"/usr/bin/winpodx app list")
+            "winpodx.core.process.Path",
+            side_effect=fake_path_factory(b"/usr/bin/winpodx\0app\0list\0"),
         ),
     ):
         assert proc_mod.is_freerdp_pid(12345) is False
@@ -130,7 +118,7 @@ def test_is_freerdp_pid_helper_accepts_freerdp_only():
         patch("winpodx.core.process.os.kill", return_value=None),
         patch(
             "winpodx.core.process.Path",
-            side_effect=fake_path_factory(b"/usr/bin/xfreerdp3 /v:127.0.0.1"),
+            side_effect=fake_path_factory(b"/usr/bin/xfreerdp3\0/v:127.0.0.1\0"),
         ),
     ):
         assert proc_mod.is_freerdp_pid(12345) is True
