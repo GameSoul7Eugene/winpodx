@@ -1,0 +1,6 @@
+# Last-known-good versions of bundled / pulled dependencies.
+# The check-windows-updates GitHub workflow reads this file weekly and
+# opens an issue when an upstream release differs.
+#
+# Format: <key>=<version>
+dockur=v5.14
