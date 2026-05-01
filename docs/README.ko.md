@@ -33,6 +33,7 @@
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=flat-square&logo=ubuntu&logoColor=white)](https://ubuntu.com/)
 [![RHEL family](https://img.shields.io/badge/RHEL%20%2F%20Alma%20%2F%20Rocky-EE0000?style=flat-square&logo=redhat&logoColor=white)](https://www.redhat.com/)
 [![Arch (AUR pending)](https://img.shields.io/badge/Arch%20(AUR)-pending-lightgrey?style=flat-square&logo=archlinux&logoColor=white)](../packaging/aur/README.md)
+[![NixOS](https://img.shields.io/badge/NixOS-5277C3?style=flat-square&logo=nixos&logoColor=white)](#install)
 
 <sub>[English](../README.md) &nbsp;·&nbsp; **한국어** &nbsp;·&nbsp; [빠른 시작](#빠른-시작) &nbsp;·&nbsp; [기능](#주요-기능) &nbsp;·&nbsp; [CLI](#cli-레퍼런스) &nbsp;·&nbsp; [멀티세션](#multi-session-rdp)</sub>
 
