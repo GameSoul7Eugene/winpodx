@@ -74,6 +74,49 @@ class WindowsExecResult:
         return self.rc == 0
 
 
+def run_via_transport(
+    cfg,
+    payload: str,
+    *,
+    description: str = "winpodx-exec",
+    timeout: int = 60,
+):
+    """Run *payload* in the guest via the best available transport.
+
+    Tries the v0.3.0 HTTP agent first (CreateNoWindow=$true child PS, no
+    user-visible flash) and falls back to FreeRDP RemoteApp ``run_in_windows``
+    when the agent isn't reachable. Mirrors the contract of ``run_in_windows``
+    so existing callers can swap one for the other without changing their
+    error-handling shape — TransportError is mapped to ``WindowsExecError``
+    on the way out.
+
+    Use this for any host->guest payload that the user shouldn't see flash
+    on the screen. The legacy ``run_in_windows`` is now reserved for paths
+    that explicitly need FreeRDP (rotation's password recovery, debug
+    probes, etc.).
+    """
+    # Imported lazily so a lightweight subprocess path stays import-cheap.
+    try:
+        from winpodx.core.transport import TransportError, dispatch
+    except Exception:  # noqa: BLE001 — transport module optional at import time
+        return run_in_windows(cfg, payload, description=description, timeout=timeout)
+
+    try:
+        transport = dispatch(cfg)
+    except Exception as e:  # noqa: BLE001 — degrade silently to FreeRDP
+        log.debug("dispatch raised, falling back to FreeRDP: %s", e)
+        return run_in_windows(cfg, payload, description=description, timeout=timeout)
+
+    if transport is None or transport.name != "agent":
+        return run_in_windows(cfg, payload, description=description, timeout=timeout)
+
+    try:
+        result = transport.exec(payload, timeout=timeout, description=description)
+    except TransportError as e:
+        raise WindowsExecError(str(e)) from e
+    return WindowsExecResult(rc=result.rc, stdout=result.stdout, stderr=result.stderr)
+
+
 def run_in_windows(
     cfg: Config,
     payload: str,

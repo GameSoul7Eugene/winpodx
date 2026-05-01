@@ -267,7 +267,7 @@ def _multi_session(action: str) -> None:
     rdprrap zip and is staged into ``C:\\OEM\\`` during install.bat.
     """
     from winpodx.core.config import Config
-    from winpodx.core.windows_exec import WindowsExecError, run_in_windows
+    from winpodx.core.windows_exec import WindowsExecError, run_via_transport
 
     cfg = Config.load()
     if cfg.pod.backend not in ("podman", "docker"):
@@ -302,7 +302,7 @@ def _multi_session(action: str) -> None:
     label = {"on": "Enabling", "off": "Disabling", "status": "Querying"}[action]
     print(f"{label} multi-session RDP via rdprrap...")
     try:
-        result = run_in_windows(cfg, payload, description=f"multi-session-{action}", timeout=45)
+        result = run_via_transport(cfg, payload, description=f"multi-session-{action}", timeout=45)
     except WindowsExecError as e:
         print(f"FAIL: channel failure: {e}")
         sys.exit(3)

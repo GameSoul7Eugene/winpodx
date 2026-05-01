@@ -231,8 +231,16 @@ def build_rdp_command(
 
     # RemoteApp (RAIL) launch; requires fDisabledAllowList=1 set by install.bat.
     if launch_uri:
-        # UWP/MSIX: launch via explorer + shell:AppsFolder\<AUMID>. The
-        # AUMID must be a bare package-family!app-id token — reject
+        # UWP/MSIX: launch via the hidden VBS wrapper rather than
+        # `explorer.exe shell:AppsFolder\<AUMID>`. The legacy explorer.exe
+        # path triggers a brief explorer RemoteApp window before the UWP
+        # frame appears — that's the "PowerShell-like flash" users see on
+        # Calculator / Settings / Terminal. wscript.exe is GUI-subsystem
+        # (no console) and launch_uwp.vbs activates the AUMID via
+        # IApplicationActivationManager directly, so the UWP frame is the
+        # only window the RemoteApp client paints.
+        #
+        # The AUMID must be a bare package-family!app-id token — reject
         # anything that looks like a flag payload or embeds separators
         # FreeRDP treats specially ("," splits /app sub-args).
         aumid = launch_uri.strip()
@@ -241,7 +249,7 @@ def build_rdp_command(
         wm_class = (wm_class_hint or "").strip().lower()
         if not wm_class or not _is_safe_wm_class(wm_class):
             wm_class = _uwp_fallback_wm_class(aumid)
-        app_arg = f"/app:program:explorer.exe,name:{wm_class},cmd:shell:AppsFolder\\{aumid}"
+        app_arg = f"/app:program:wscript.exe,name:{wm_class},cmd:C:\\OEM\\launch_uwp.vbs {aumid}"
         cmd.append(app_arg)
         cmd.append(f"/wm-class:{wm_class}")
         cmd.append("+grab-keyboard")

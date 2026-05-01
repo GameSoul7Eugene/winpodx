@@ -157,10 +157,10 @@ def sync_windows_time(cfg: Config) -> bool:
         return False
 
     payload = "& w32tm /resync /force | Out-Null\nWrite-Output 'time synced'\n"
-    from winpodx.core.windows_exec import WindowsExecError, run_in_windows
+    from winpodx.core.windows_exec import WindowsExecError, run_via_transport
 
     try:
-        result = run_in_windows(cfg, payload, description="sync-time", timeout=30)
+        result = run_via_transport(cfg, payload, description="sync-time", timeout=30)
     except WindowsExecError as e:
         log.warning("Time sync channel failure: %s", e)
         return False
