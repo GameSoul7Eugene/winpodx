@@ -104,24 +104,33 @@ function Get-DisplayName {
 
 function Get-AppDescription {
     # Pull a one-line description from the executable's version metadata.
-    # Order: Comments (most descriptive when authors fill it in) >
-    # ProductName (brand string, e.g. "Microsoft Edge") > empty. We
-    # deliberately don't reuse FileDescription here — Get-DisplayName
-    # already returns it as the *name*, and re-emitting it as the
-    # Comment would be redundant on the Linux side.
+    # Win32 binaries rarely fill Comments; ProductName + CompanyName are the
+    # only fields we can rely on. The output lands in the Linux .desktop
+    # Comment= key (a tooltip), so identical-to-the-name strings are still
+    # useful — better to surface "Microsoft Edge" than the project-wide
+    # "Windows application via winpodx" generic stamp.
+    #
+    # Order:
+    #   1. Comments — most authored field; trust it when set.
+    #   2. ProductName when distinct from FileDescription (gives e.g.
+    #      "Microsoft Windows Operating System" for inbox tools where the
+    #      FileDescription is just "Notepad").
+    #   3. CompanyName when present — "by Microsoft Corporation" is a
+    #      meaningful tooltip even when ProductName duplicates the name.
+    #   4. Bare ProductName as a last resort (still better than nothing).
     param([string]$ExePath)
     try {
         $item = Get-Item -LiteralPath $ExePath -ErrorAction Stop
         $vi = $item.VersionInfo
         if (-not $vi) { return '' }
-        if ($vi.Comments -and $vi.Comments.Trim()) { return $vi.Comments.Trim() }
-        if ($vi.ProductName -and $vi.ProductName.Trim()) {
-            $product = $vi.ProductName.Trim()
-            $name = if ($vi.FileDescription) { $vi.FileDescription.Trim() } else { '' }
-            # Avoid the Comment === Name case ("Microsoft Edge" / "Microsoft Edge");
-            # that's no more useful than the generic fallback the host stamps.
-            if ($product -ne $name) { return $product }
-        }
+        $comments = if ($vi.Comments) { $vi.Comments.Trim() } else { '' }
+        if ($comments) { return $comments }
+        $product = if ($vi.ProductName) { $vi.ProductName.Trim() } else { '' }
+        $fileDesc = if ($vi.FileDescription) { $vi.FileDescription.Trim() } else { '' }
+        $company = if ($vi.CompanyName) { $vi.CompanyName.Trim() } else { '' }
+        if ($product -and $product -ne $fileDesc) { return $product }
+        if ($company) { return "by $company" }
+        if ($product) { return $product }
     } catch { }
     return ''
 }
