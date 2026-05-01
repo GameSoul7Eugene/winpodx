@@ -481,7 +481,48 @@ def discover_apps(
             f"Cannot read discovery script {script}: {e}", kind="script_missing"
         ) from e
 
-    from winpodx.core.windows_exec import WindowsExecError, run_in_windows
+    # Prefer the HTTP agent transport when it answers /health — the
+    # discovery script regularly takes 15-25s and the legacy FreeRDP
+    # RemoteApp channel hits a hard 30s wall (kernalix7 saw the timeout
+    # on 2026-05-01 with a stock Win11 install). The agent's /exec has a
+    # default 60s timeout and exposes the script's stdout directly via
+    # JSON so we don't have to round-trip a result file. Falls back to
+    # FreeRDP automatically if /health doesn't answer.
+    from winpodx.core.transport import TransportError, dispatch
+    from winpodx.core.windows_exec import WindowsExecError
+
+    try:
+        transport = dispatch(cfg)
+    except Exception as e:  # noqa: BLE001 — never let dispatch take down the run
+        log.debug("transport dispatch failed, falling back to FreeRDP: %s", e)
+        transport = None
+
+    if transport is not None and transport.name == "agent":
+        if progress_callback:
+            try:
+                progress_callback("Connecting to guest agent...")
+            except Exception:  # noqa: BLE001 — progress is decorative
+                pass
+        try:
+            tresult = transport.exec(script_body, timeout=timeout, description="discover-apps")
+        except TransportError as e:
+            msg = str(e).lower()
+            kind = (
+                "pod_not_running"
+                if "no result file" in msg or "auth" in msg or "unavailable" in msg
+                else "script_failed"
+            )
+            raise DiscoveryError(f"Discovery channel failure: {e}", kind=kind) from e
+        if tresult.rc != 0:
+            raise DiscoveryError(
+                f"Discovery script failed (rc={tresult.rc}): {tresult.stderr.strip()}",
+                kind="script_failed",
+            )
+        return _parse_discovery_output(tresult.stdout)
+
+    # Agent unreachable — fall back to FreeRDP RemoteApp. Slower (30s
+    # cap) but always available once the pod is up and RDP works.
+    from winpodx.core.windows_exec import run_in_windows
 
     try:
         result = run_in_windows(
@@ -493,11 +534,6 @@ def discover_apps(
         )
     except WindowsExecError as e:
         msg = str(e).lower()
-        # FreeRDP failed to connect at the channel level — most often
-        # because the pod is stopped (no RDP listener) or the auth
-        # password drifted from cfg. Surface as pod_not_running so cli
-        # routes to exit code 2 + the helpful "run `winpodx pod start
-        # --wait` first" hint.
         kind = "pod_not_running" if "no result file" in msg or "auth" in msg else "script_failed"
         raise DiscoveryError(f"Discovery channel failure: {e}", kind=kind) from e
 
