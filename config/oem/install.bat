@@ -1,7 +1,7 @@
 @echo off
 REM First-boot OEM setup for winpodx Windows guest. Runs once during dockur's unattended install. Every action must stay idempotent — there is no guest-side re-run channel in 0.1.6 (push/exec bridge planned for a later release).
 
-set WINPODX_OEM_VERSION=12
+set WINPODX_OEM_VERSION=13
 
 echo [winpodx] Starting post-install configuration (version %WINPODX_OEM_VERSION%)...
 
@@ -261,6 +261,9 @@ REM v0.2.2-rev1: winpodx guest HTTP agent
 REM ---------------------------------------------------------------------
 echo [winpodx] Installing winpodx guest agent...
 copy /Y "%~dp0agent\agent.ps1" "C:\OEM\agent.ps1" 2>nul
+copy /Y "%~dp0hidden-launcher.vbs" "C:\OEM\hidden-launcher.vbs" 2>nul
+copy /Y "%~dp0launch_uwp.vbs" "C:\OEM\launch_uwp.vbs" 2>nul
+copy /Y "%~dp0launch_uwp.ps1" "C:\OEM\launch_uwp.ps1" 2>nul
 mkdir C:\OEM\agent-runs 2>nul
 
 REM Pre-register the URL ACL for agent.ps1's HttpListener prefix.
@@ -286,11 +289,14 @@ netsh http delete urlacl url=http://127.0.0.1:8765/ >nul 2>&1
 netsh http delete urlacl url=http://+:8765/ >nul 2>&1
 netsh http add urlacl url=http://+:8765/ user=Everyone listen=yes >nul 2>&1
 
-REM Register agent at user logon. HKCU\Run mirrors the existing WinpodxMedia
-REM entry above — fires for whichever account dockur autologons. We do NOT
-REM use schtasks /SC ONLOGON /RU User /RL HIGHEST: the principal name is
-REM not always cfg.rdp.user and /RL HIGHEST races dockur's autologon UAC.
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v WinpodxAgent /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\OEM\agent.ps1" /f >nul 2>&1
+REM Register agent at user logon via the hidden VBS launcher rather than
+REM `powershell.exe -WindowStyle Hidden`. The Hidden flag is honored AFTER
+REM PowerShell allocates its conhost, so a brief PS console flashes for
+REM ~50ms on every user logon. wscript.exe is a GUI-subsystem process
+REM (no console of its own) and WshShell.Run with intWindowStyle=0
+REM propagates SW_HIDE to CreateProcess — the spawned powershell starts
+REM windowless, never flashing.
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v WinpodxAgent /t REG_SZ /d "wscript.exe \"C:\OEM\hidden-launcher.vbs\" \"powershell.exe\" \"-NoProfile\" \"-ExecutionPolicy\" \"Bypass\" \"-File\" \"C:\OEM\agent.ps1\"" /f >nul 2>&1
 
 REM Token is delivered via the OEM bind mount — no \\tsclient\home copy
 REM needed. Setup stages it to {oem_dir}/agent_token.txt before container

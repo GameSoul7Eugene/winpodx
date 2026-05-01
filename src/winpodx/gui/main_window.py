@@ -2496,7 +2496,7 @@ class WinpodxWindow(QMainWindow):
         self.info_label.setText("Running debloat...")
 
         def _do() -> None:
-            from winpodx.core.windows_exec import WindowsExecError, run_in_windows
+            from winpodx.core.windows_exec import WindowsExecError, run_via_transport
 
             cfg = Config.load()
             base = Path(__file__).parent.parent.parent.parent
@@ -2522,7 +2522,7 @@ class WinpodxWindow(QMainWindow):
                 return
 
             try:
-                result = run_in_windows(cfg, payload, description="debloat", timeout=180)
+                result = run_via_transport(cfg, payload, description="debloat", timeout=180)
             except WindowsExecError as e:
                 self.app_launch_failed.emit(f"Debloat channel failure: {e}")
                 return

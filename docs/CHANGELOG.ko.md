@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### 변경
+- **PowerShell 창 깜빡임 0 — 게스트 경로가 hidden VBS 런처와 agent 트랜스포트로 모두 통합.** 3가지 수정 합쳐짐:
+  - **Agent 자동시작이 `hidden-launcher.vbs` 경유.** HKCU\Run 이 `powershell.exe -WindowStyle Hidden -File C:\OEM\agent.ps1` 을 등록했는데, Hidden 플래그는 PowerShell 이 conhost 할당한 *후에* 적용되므로 사용자 로그인마다 ~50ms 짜리 PS 콘솔이 깜빡였음. 새 VBS wrapper 는 GUI 서브시스템 (자체 콘솔 없음) 이고 `WshShell.Run intWindowStyle=0` 이 `SW_HIDE` 를 `CreateProcess` 에 전달해서 spawn 된 PowerShell 이 windowless 로 시작됨.
+  - **UWP launch 가 `IApplicationActivationManager` 경유.** 기존 `/app:program:explorer.exe,cmd:shell:AppsFolder\<AUMID>` 가 UWP 프레임이 뜨기 전에 explorer.exe RemoteApp 윈도를 ~300ms 보여줬음 — Calculator / Settings / Terminal 에서 사용자가 보던 "PowerShell 같은 깜빡임" 이 그거. RemoteApp 이 이제 `wscript.exe launch_uwp.vbs <AUMID>` 호출 → `IApplicationActivationManager::ActivateApplication` 직접 호출. UWP 프레임이 transition 없이 RemoteApp 윈도로 바로 등장; ~300ms 도 단축.
+  - **잔여 `run_in_windows` 호출자들이 agent 트랜스포트 경유.** `core.updates`, `core.daemon.sync_windows_time`, `cli.pod.multi-session`, `cli.main.debloat`, GUI Tools 페이지 debloat 핸들러 — 이제 모두 `winpodx.core.windows_exec.run_via_transport` 경유. v0.3.0 agent 의 `/exec` (CreateNoWindow=$true) 를 우선 시도하고 `/health` 응답 없을 때만 FreeRDP RemoteApp 폴백. 비밀번호 회전 (rule #6) 과 `winpodx pod sync-password` 복구 경로는 직접 credential 인증이 필요해서 의도적으로 FreeRDP 유지.
+
+OEM 번들이 13 으로 bump (새 VBS 파일들이 `C:\OEM\` 에 stage); 기존 pod 에 적용하려면 컨테이너 재생성 (또는 fresh install 의 first-boot reapply 트리거). 0.3.0-RTM1 기존 pod 는 정상 동작 — 단지 재생성 전까지 agent 자동시작과 UWP launch 시 짧은 PS 깜빡임이 남아있음.
+
 ### 추가
 - **하이브리드 디스커버리 필터 — 필수앱 항상 표시, 시스템 shim 기본 hide.** Windows 11 기본 install 에서 자동 디스커버리가 ~45개 entry 를 만드는데 두 종류 노이즈 같이 발생 — OS 필수앱 (File Explorer / Calculator / Settings) 은 Start Menu .lnk 로 enumerate 안 돼서 누락, 시스템 shim (`LicenseManagerShellExt`, `WindowsPackageManagerServer`, `DesktopPackageMetadata`, `microsoft-store-server` …) 들은 grid 어지럽힘. 필터가 이제 큐레이션된 essentials allowlist (스캔이 놓친 필수앱은 stub 합성) 와 noise denylist (`hidden = true` 자동 stamp 해서 GUI grid 가 거름) 를 같이 가짐. 사용자 override 가 우선 — 타일에 Hide / Show 토글하면 같은 TOML 에 기록돼서 다음 디스커버리 sweep 에서도 유지. discover_apps.ps1 가 essentials 3개를 실제 Windows 아이콘과 같이 명시적으로 emit (File Explorer 는 `C:\Windows\explorer.exe` 에서, Calculator + Settings 는 AppxManifest Square logo 에서 추출) — 사용자가 generic 한 letter avatar 가 아닌 진짜 Windows 아이콘 봄.
 - **Win32 launch args.** RDP RemoteApp builder 가 `app.toml` 의 per-app `args` 문자열을 honor 해서 FreeRDP `cmd:` 필드로 forward. 오래된 "explorer.exe RemoteApp 뜨면 아무것도 안 보임" 문제 해결 — File Explorer essential 이 `args = "shell:MyComputerFolder"` 같이 emit 돼서 `This PC` view 가 정상 윈도로 열림 (user shell 점령 시도 안 함). 기존 `args = ""` 앱은 영향 없음.

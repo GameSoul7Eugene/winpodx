@@ -409,7 +409,7 @@ def _cmd_debloat() -> None:
     from pathlib import Path
 
     from winpodx.core.config import Config
-    from winpodx.core.windows_exec import WindowsExecError, run_in_windows
+    from winpodx.core.windows_exec import WindowsExecError, run_via_transport
 
     cfg = Config.load()
     if cfg.pod.backend not in ("podman", "docker"):
@@ -433,7 +433,7 @@ def _cmd_debloat() -> None:
 
     print("Running debloat (this may take a minute)...")
     try:
-        result = run_in_windows(cfg, payload, description="debloat", timeout=180)
+        result = run_via_transport(cfg, payload, description="debloat", timeout=180)
     except WindowsExecError as e:
         print(f"Debloat channel failure: {e}")
         return

@@ -27,10 +27,10 @@ def _exec_toggle(cfg: Config, action: str) -> tuple[bool, str]:
         f"& 'C:\\OEM\\toggle_updates.ps1' -Action '{action}'\n"
         "if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n"
     )
-    from winpodx.core.windows_exec import WindowsExecError, run_in_windows
+    from winpodx.core.windows_exec import WindowsExecError, run_via_transport
 
     try:
-        result = run_in_windows(cfg, payload, description=f"updates-{action}", timeout=45)
+        result = run_via_transport(cfg, payload, description=f"updates-{action}", timeout=45)
     except WindowsExecError as e:
         return False, str(e)
 
