@@ -625,6 +625,23 @@ def test_discover_requires_script_file():
             discover_apps(cfg)
 
 
+def _force_freerdp_path(monkeypatch):
+    """Make discover_apps fall through to the FreeRDP run_in_windows path
+    instead of the agent transport.
+
+    Tests stub run_in_windows; if dispatch() resolves to an AgentTransport
+    (which happens on dev boxes that have a real agent listening on
+    127.0.0.1:8765), our code never reaches run_in_windows and the stub
+    is bypassed. Patch dispatch to raise so the discover_apps wrapper
+    catches it and continues to the FreeRDP fallback.
+    """
+
+    def boom(_cfg, **_kw):
+        raise RuntimeError("agent transport disabled for tests")
+
+    monkeypatch.setattr("winpodx.core.transport.dispatch", boom)
+
+
 def _stub_run_in_windows(
     monkeypatch,
     *,
@@ -635,7 +652,11 @@ def _stub_run_in_windows(
 ):
     """v0.1.9.5: discover_apps now goes through windows_exec.run_in_windows.
     Tests stub the new entry point and capture the (description, payload) pair.
+
+    Implicitly forces the FreeRDP path so a live agent on the dev box
+    doesn't bypass the stub via the new transport.dispatch route.
     """
+    _force_freerdp_path(monkeypatch)
     from winpodx.core.windows_exec import WindowsExecResult
 
     captured: dict[str, str] = {}
