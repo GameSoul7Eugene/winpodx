@@ -190,16 +190,20 @@ Get-WinpodxCompletedSteps
     [OutputType([string[]])]
     param()
 
+    # `return ,@()` (comma-prefixed) preserves array context across the
+    # function-return pipeline; a bare `return @()` collapses to $null on
+    # the caller side and breaks downstream JSON serialisation
+    # (last_log_lines/this list both must remain a JSON array, not null).
     if (-not (Test-Path -LiteralPath $script:WpxStateDir -PathType Container)) {
-        return @()
+        return ,@()
     }
     $entries = Get-ChildItem -LiteralPath $script:WpxStateDir -Filter '*.done' `
                   -File -ErrorAction SilentlyContinue
-    if ($null -eq $entries) { return @() }
+    if ($null -eq $entries) { return ,@() }
     $names = foreach ($e in $entries) {
         $e.Name.Substring(0, $e.Name.Length - '.done'.Length)
     }
-    return @($names | Sort-Object)
+    return ,@($names | Sort-Object)
 }
 
 # ----- Public: retry counter -----------------------------------------
@@ -446,23 +450,27 @@ function _Wpx_GetRamTotalMb {
 
 function _Wpx_TailLog {
     # Last 50 lines of install.log, redacted, each capped to 1000 chars
-    # (schema items.maxLength).
+    # (schema items.maxLength). `return ,@()` (comma-prefixed) is required:
+    # the function return pipeline unwraps a bare `@()` to $null, which
+    # ConvertTo-Json then serialises as JSON null -- breaking the
+    # last_log_lines schema (type: array). The unary comma adds an outer
+    # wrapper so the pipeline unwraps to the empty array, not past it.
     if (-not (Test-Path -LiteralPath $script:WpxLogPath -PathType Leaf)) {
-        return @()
+        return ,@()
     }
     $lines = $null
     try {
         $lines = Get-Content -LiteralPath $script:WpxLogPath -Tail 50 -ErrorAction Stop
     } catch {
-        return @()
+        return ,@()
     }
-    if ($null -eq $lines) { return @() }
+    if ($null -eq $lines) { return ,@() }
     $out = foreach ($ln in $lines) {
         $safe = Invoke-WinpodxRedact -Line $ln
         if ($safe.Length -gt 1000) { $safe = $safe.Substring(0, 1000) }
         $safe
     }
-    return @($out)
+    return ,@($out)
 }
 
 function Write-WinpodxFailure {
@@ -501,6 +509,13 @@ Write-WinpodxFailure -Step rdprrap_installed -Phase 2 -Attempt 3 -MaxAttempts 3 
         ram_total_mb  = _Wpx_GetRamTotalMb
     }
 
+    # Force array context on the tail-log result. Even with `return ,@()`
+    # inside _Wpx_TailLog, hashtable-key assignment can collapse a
+    # single-item return; the @() wrapper here is a second belt to
+    # guarantee ConvertTo-Json emits `"last_log_lines": []` rather than
+    # `"last_log_lines": null` when the log file is missing.
+    $tail = @(_Wpx_TailLog)
+
     $payload = [ordered]@{
         session_id     = _Wpx_GetSessionId
         failed_step    = $Step
@@ -512,7 +527,7 @@ Write-WinpodxFailure -Step rdprrap_installed -Phase 2 -Attempt 3 -MaxAttempts 3 
         error_summary  = $summary
         timestamp_utc  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         environment    = $env_block
-        last_log_lines = _Wpx_TailLog
+        last_log_lines = $tail
     }
 
     # Bare minimum schema check -- the helper does not pull in
