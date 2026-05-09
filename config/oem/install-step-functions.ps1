@@ -30,6 +30,8 @@
 #   * Invoke-Step-multi_session_active      - Phase 2
 #   * Invoke-Step-install_complete          - Phase 3
 #   * Start-WinpodxWatchdog                 - launch watchdog.ps1 detached
+#   * Register-WinpodxResumeTask            - register winpodx-install-resume
+#   * Unregister-WinpodxResumeTask          - remove the Scheduled Task (uninstall)
 #
 # Dependencies:
 #   * install-state-helpers.ps1 already dot-sourced by the caller
@@ -395,6 +397,17 @@ function Register-WinpodxResumeTask {
         -DontStopIfGoingOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName 'winpodx-install-resume' -Action $action `
         -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+}
+
+# Unregister the winpodx-install-resume Scheduled Task. Idempotent --
+# safe to call even when the task is missing (a future uninstall path
+# can dot-source this file and call without preflighting). Reachable
+# from any caller that already dot-sources install-step-functions.ps1.
+function Unregister-WinpodxResumeTask {
+    $existing = Get-ScheduledTask -TaskName 'winpodx-install-resume' -ErrorAction SilentlyContinue
+    if ($null -ne $existing) {
+        Unregister-ScheduledTask -TaskName 'winpodx-install-resume' -Confirm:$false | Out-Null
+    }
 }
 
 function Start-WinpodxAgent {
