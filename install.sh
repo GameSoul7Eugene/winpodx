@@ -511,7 +511,13 @@ if [ -f "$HOME/.config/winpodx/winpodx.toml" ] && [ "${WINPODX_NO_WAIT:-}" != "1
     # abort install.sh — `|| true` keeps us going so we can inspect
     # the captured output.
     WAIT_READY_OUT="$(mktemp)"
-    "$HOME/.local/bin/winpodx" pod wait-ready --timeout 3600 --logs 2>&1 \
+    # PYTHONUNBUFFERED=1 forces Python's stdout to line-buffered even
+    # when piped (otherwise the pipe to `tee` flips Python from
+    # line-buffered to 4KB-block-buffered, batching minutes of progress
+    # into a single flush at the end). Without this, `[1/3] container
+    # ...`, the [container] log tail, and `OK ...` lines all arrive at
+    # once when the step completes — see Task #45 / PR #143 regression.
+    PYTHONUNBUFFERED=1 "$HOME/.local/bin/winpodx" pod wait-ready --timeout 3600 --logs 2>&1 \
         | tee "$WAIT_READY_OUT" || true
     WAIT_READY_RC="${PIPESTATUS[0]}"
     if [ "$WAIT_READY_RC" -ne 0 ]; then
