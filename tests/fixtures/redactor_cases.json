@@ -202,6 +202,48 @@
       "input": "sha256 abc123def456abc123def456abc123def456abc123def456abc123def4561234",
       "expected": "sha256 <BASE64-REDACTED>",
       "must_not_contain": ["abc123def456abc123def456abc123def456abc123def456abc123def4561234"]
+    },
+    {
+      "id": "freerdp_p_colon_short",
+      "description": "xfreerdp /p:<password> short form -> /p:<REDACTED>; the value runs to the next whitespace.",
+      "input": "xfreerdp /p:hunter2 /v:host",
+      "expected": "xfreerdp /p:<REDACTED> /v:host",
+      "must_not_contain": ["hunter2"]
+    },
+    {
+      "id": "freerdp_password_colon_long",
+      "description": "xfreerdp /password:<password> long form -> /password:<REDACTED>.",
+      "input": "xfreerdp /password:longerSecret /v:host",
+      "expected": "xfreerdp /password:<REDACTED> /v:host",
+      "must_not_contain": ["longerSecret"]
+    },
+    {
+      "id": "wfreerdp_dash_p_colon",
+      "description": "Dash-prefix variant -p:<password> (some tooling, including wfreerdp, accepts this form).",
+      "input": "wfreerdp -p:dashColon /v:host",
+      "expected": "wfreerdp -p:<REDACTED> /v:host",
+      "must_not_contain": ["dashColon"]
+    },
+    {
+      "id": "freerdp_p_space_slash",
+      "description": "Space form: /p <password> (slash + p + whitespace + value). Eats up to next whitespace.",
+      "input": "xfreerdp /p spaceForm /v:host",
+      "expected": "xfreerdp /p <REDACTED> /v:host",
+      "must_not_contain": ["spaceForm"]
+    },
+    {
+      "id": "freerdp_dash_p_space",
+      "description": "Space form, dash variant: -p <password>.",
+      "input": "xfreerdp -p shortDashSpace /v:host",
+      "expected": "xfreerdp -p <REDACTED> /v:host",
+      "must_not_contain": ["shortDashSpace"]
+    },
+    {
+      "id": "freerdp_p_colon_with_special_chars",
+      "description": "Edge case: password contains '=' and '&' -- the colon form uses [^\\s]+ so neither character terminates the match, the entire run up to the next whitespace is redacted.",
+      "input": "xfreerdp /p:secret=with=equals&amp_too /v:host",
+      "expected": "xfreerdp /p:<REDACTED> /v:host",
+      "must_not_contain": ["secret=with=equals&amp_too", "secret=with=equals", "amp_too"]
     }
   ]
 }
