@@ -350,11 +350,15 @@ function Invoke-Step-token_staged {
             # readable to BUILTIN\Users for the ~60-90s window between
             # Phase 0 (Defender exclusion) and this step. Tightening the
             # source first ensures no other user (or background process)
-            # can read the token while we're staging it. Read-only here
-            # because we never write back to the OEM source after this.
-            # (security review #12)
+            # can read the token while we're staging it. Grant the
+            # auto-logon user (R,W) -- NOT bare R -- because Phase 3
+            # later zeroes this same file via [IO.File]::WriteAllBytes
+            # before deletion. Read-only would make the zero-write throw
+            # UnauthorizedAccessException, the post-condition would fail,
+            # and every install would end in install_failure.json.
+            # (security review #12 / re-review #18)
             & icacls.exe $script:WpxAgentTokenSrc /inheritance:r 2>&1 | Out-Null
-            & icacls.exe $script:WpxAgentTokenSrc /grant:r ("${user}:R") 2>&1 | Out-Null
+            & icacls.exe $script:WpxAgentTokenSrc /grant:r ("${user}:(R,W)") 2>&1 | Out-Null
 
             $dstDir = Split-Path -Parent $script:WpxAgentTokenDst
             if (-not (Test-Path -LiteralPath $dstDir)) {

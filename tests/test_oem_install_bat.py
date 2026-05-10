@@ -93,10 +93,28 @@ def test_step_functions_phase06_tightens_oem_source_acl() -> None:
     OEM-source token BEFORE reading. Look for an icacls call on
     WpxAgentTokenSrc inside the token_staged body."""
     text = STEP_FUNCTIONS.read_text(encoding="utf-8")
-    # The early icacls call references the SOURCE constant, granting :R
-    # (read-only) -- distinct from the DST call which uses :(R,W).
     assert "icacls.exe $script:WpxAgentTokenSrc /inheritance:r" in text
-    assert "${user}:R" in text
+
+
+def test_step_functions_phase06_grants_rw_not_bare_r_on_oem_source() -> None:
+    """Security review #18 (re-review BLOCKER): the OEM-source ACL grant
+    must be (R,W), not bare R. Phase 3 install_complete zeroes this same
+    file via [IO.File]::WriteAllBytes before deletion; a read-only ACL
+    here would throw UnauthorizedAccessException at zero-write time,
+    fail the hard post-condition, and force every install into
+    install_failure.json with error_class=install_complete_failed.
+
+    Pin the (R,W) form on the WpxAgentTokenSrc grant line so the next
+    refactor can't accidentally drop the W."""
+    text = STEP_FUNCTIONS.read_text(encoding="utf-8")
+    src_grant_line = next(
+        ln for ln in text.splitlines()
+        if "icacls.exe $script:WpxAgentTokenSrc /grant:r" in ln
+    )
+    assert "(R,W)" in src_grant_line, (
+        "Phase 0.6 OEM-source grant lost W permission -- Phase 3 zero-write "
+        "will throw UnauthorizedAccessException. See security review #18."
+    )
 
 
 def test_watchdog_branches_on_install_complete_marker() -> None:
