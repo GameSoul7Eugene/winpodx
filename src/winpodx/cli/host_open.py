@@ -42,6 +42,15 @@ from typing import Any
 from winpodx.core.config import Config
 from winpodx.reverse_open.discovery import LinuxApp, discover_apps
 from winpodx.reverse_open.icons import convert_to_ico, resolve_icon
+from winpodx.reverse_open.lifecycle import (
+    DaemonPaths,
+    ListenerStartFailed,
+    is_listener_running,
+    reload_apps_db,
+    start_listener,
+    stop_listener,
+)
+from winpodx.reverse_open.listener import ListenerConfig
 from winpodx.utils.paths import data_dir
 
 _SLUG_VALIDATE = re.compile(r"^[a-z0-9-]+$")
@@ -66,6 +75,54 @@ def _icons_dir() -> Path:
 def _apps_json() -> Path:
     """Path to the staged ``apps.json`` manifest written by ``refresh``."""
     return _reverse_open_dir() / "apps.json"
+
+
+def _incoming_dir() -> Path:
+    """Daemon's watched directory for guest-written request files."""
+    return _reverse_open_dir() / "incoming"
+
+
+def _seen_uuids_path() -> Path:
+    """Path to the persistent replay-defence ring buffer."""
+    return _reverse_open_dir() / "seen-uuids.json"
+
+
+def _share_roots(cfg: Config) -> dict[str, Path]:
+    """Map FreeRDP drive aliases → POSIX paths the daemon will spawn from.
+
+    Built from the same flags ``core/rdp.py`` passes to xfreerdp3:
+
+    - ``+home-drive`` makes ``\\\\tsclient\\home`` map to ``$HOME``.
+    - ``/drive:media,<path>`` makes ``\\\\tsclient\\media`` map to the
+      detected media base (when a USB stick / external mount is
+      present at session-start time).
+
+    Phase 2a stages the manifest under ``$HOME``, so listing
+    ``home`` is the only mapping that has to be present for the
+    feature to work; ``media`` is opportunistic.
+
+    The listener feeds this dict to :func:`safe_open_unc`; any
+    guest-supplied UNC path that doesn't resolve under one of these
+    roots is rejected at the open boundary.
+    """
+    from winpodx.core.rdp import _find_media_base  # local import — heavy
+
+    roots: dict[str, Path] = {"home": Path.home()}
+    try:
+        media = _find_media_base()
+    except Exception:  # noqa: BLE001 — never let a probe failure block startup
+        media = None
+    if media:
+        roots["media"] = Path(media)
+    return roots
+
+
+def _listener_config(cfg: Config) -> ListenerConfig:
+    """Default daemon tuning — wired through host_open + tests can override."""
+    return ListenerConfig(
+        incoming_dir=_incoming_dir(),
+        share_roots=_share_roots(cfg),
+    )
 
 
 def _filter_apps(apps: list[LinuxApp], cfg: Config) -> tuple[list[LinuxApp], list[tuple[str, str]]]:
@@ -167,6 +224,12 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
     tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(apps_json_path)
 
+    # If a daemon is running, signal it to re-load the manifest so
+    # the fresh app list takes effect without a restart. SIGHUP is
+    # the canonical "reload your config" signal; lifecycle.py wires
+    # it up to AppsDatabase.load().
+    daemon_reloaded = reload_apps_db()
+
     if args.json:
         out = {
             "discovered": len(apps),
@@ -175,6 +238,7 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
             "icons_real": sum(1 for ok in icon_results.values() if ok),
             "icons_placeholder": sum(1 for ok in icon_results.values() if not ok),
             "apps_json": str(apps_json_path),
+            "daemon_reloaded": daemon_reloaded,
         }
         json.dump(out, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
@@ -187,6 +251,8 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
             ph = sum(1 for ok in icon_results.values() if not ok)
             print(f"  Icons: {real} resolved, {ph} placeholder.")
         print(f"  Manifest: {apps_json_path}")
+        if daemon_reloaded:
+            print("  Daemon: SIGHUP sent; new manifest loaded.")
         if not cfg.reverse_open.enabled:
             print("  Note: reverse-open is disabled; run `winpodx host-open enable` to activate.")
     return 0
@@ -398,6 +464,70 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+# ----- daemon lifecycle subcommands -------------------------------------------
+
+
+def _cmd_start_listener(args: argparse.Namespace) -> int:
+    cfg = Config.load()
+    listener_cfg = _listener_config(cfg)
+    listener_cfg.incoming_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        listener_cfg.incoming_dir.chmod(0o700)
+    except OSError as exc:
+        print(f"error: cannot tighten incoming dir permissions: {exc}", file=sys.stderr)
+        return 1
+    apps_path = _apps_json()
+    seen_path = _seen_uuids_path()
+    try:
+        pid = start_listener(listener_cfg, apps_path, seen_path)
+    except ListenerStartFailed as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        json.dump({"pid": pid, "incoming_dir": str(listener_cfg.incoming_dir)}, sys.stdout)
+        sys.stdout.write("\n")
+    else:
+        print(f"reverse-open listener: pid {pid}")
+        print(f"  watching: {listener_cfg.incoming_dir}")
+    return 0
+
+
+def _cmd_stop_listener(args: argparse.Namespace) -> int:
+    sent = stop_listener()
+    if args.json:
+        json.dump({"stopped": sent}, sys.stdout)
+        sys.stdout.write("\n")
+    else:
+        print("reverse-open listener: stopped" if sent else "reverse-open listener: not running")
+    return 0
+
+
+def _cmd_daemon_status(args: argparse.Namespace) -> int:
+    pid = is_listener_running()
+    paths = DaemonPaths.default()
+    if args.json:
+        json.dump(
+            {
+                "running": pid is not None,
+                "pid": pid,
+                "pid_file": str(paths.pid_file),
+                "log_file": str(paths.log_file),
+            },
+            sys.stdout,
+            indent=2,
+            sort_keys=True,
+        )
+        sys.stdout.write("\n")
+    else:
+        if pid is None:
+            print("reverse-open listener: not running")
+        else:
+            print(f"reverse-open listener: running (pid {pid})")
+        print(f"  pid file: {paths.pid_file}")
+        print(f"  log file: {paths.log_file}")
+    return 0
+
+
 # ----- parser wiring ----------------------------------------------------------
 
 
@@ -452,6 +582,13 @@ def add_subcommand(top_subparsers: argparse._SubParsersAction) -> None:
     rm.add_argument("slug")
     rm.add_argument("--deny", action="store_true", help="Remove from denylist instead")
 
+    start = sub.add_parser("start-listener", help="Start the reverse-open daemon")
+    start.add_argument("--json", action="store_true", help="Machine-readable output")
+    stop = sub.add_parser("stop-listener", help="Stop the reverse-open daemon")
+    stop.add_argument("--json", action="store_true", help="Machine-readable output")
+    dstat = sub.add_parser("daemon-status", help="Show whether the daemon is running")
+    dstat.add_argument("--json", action="store_true", help="Machine-readable output")
+
 
 def handle(args: argparse.Namespace) -> int:
     """Dispatch ``host-open`` sub-subcommand to its handler."""
@@ -471,6 +608,9 @@ def handle(args: argparse.Namespace) -> int:
         "disable": _cmd_disable,
         "add": _cmd_add,
         "remove": _cmd_remove,
+        "start-listener": _cmd_start_listener,
+        "stop-listener": _cmd_stop_listener,
+        "daemon-status": _cmd_daemon_status,
     }
     handler = handlers.get(cmd)
     if handler is None:
