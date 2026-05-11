@@ -286,3 +286,61 @@ def test_no_subcommand_errors_helpfully(capsys: pytest.CaptureFixture[str]) -> N
     err = capsys.readouterr().err
     assert "missing subcommand" in err
     assert rc != 0
+
+
+# --- daemon lifecycle subcommands -------------------------------------------
+
+
+def test_daemon_status_when_not_running(capsys: pytest.CaptureFixture[str]) -> None:
+    cli_main(["host-open", "daemon-status"])
+    out = capsys.readouterr().out
+    assert "not running" in out
+
+
+def test_daemon_status_json(capsys: pytest.CaptureFixture[str]) -> None:
+    cli_main(["host-open", "daemon-status", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["running"] is False
+    assert payload["pid"] is None
+    assert payload["pid_file"].endswith("reverse-open.pid")
+
+
+def test_stop_listener_when_not_running(capsys: pytest.CaptureFixture[str]) -> None:
+    cli_main(["host-open", "stop-listener"])
+    out = capsys.readouterr().out
+    assert "not running" in out
+
+
+def test_start_then_stop_then_status(capsys: pytest.CaptureFixture[str]) -> None:
+    _write_app("kate.desktop", _KATE)
+    cli_main(["host-open", "refresh", "--skip-icons"])
+    capsys.readouterr()
+
+    cli_main(["host-open", "start-listener"])
+    out = capsys.readouterr().out
+    assert "pid" in out
+
+    cli_main(["host-open", "daemon-status"])
+    assert "running (pid " in capsys.readouterr().out
+
+    cli_main(["host-open", "stop-listener"])
+    assert "stopped" in capsys.readouterr().out
+
+    cli_main(["host-open", "daemon-status"])
+    assert "not running" in capsys.readouterr().out
+
+
+def test_refresh_signals_running_daemon(capsys: pytest.CaptureFixture[str]) -> None:
+    _write_app("kate.desktop", _KATE)
+    cli_main(["host-open", "refresh", "--skip-icons"])
+    capsys.readouterr()
+    cli_main(["host-open", "start-listener"])
+    capsys.readouterr()
+
+    try:
+        cli_main(["host-open", "refresh", "--skip-icons"])
+        out = capsys.readouterr().out
+        assert "SIGHUP" in out
+    finally:
+        cli_main(["host-open", "stop-listener"])
+        capsys.readouterr()
