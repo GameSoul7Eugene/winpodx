@@ -41,7 +41,10 @@ Maintenance + ergonomics release. Wider curated Windows edition support, headles
 - **Discovery cleanup** (#182) — `winpodx app refresh` no longer re-imports the reverse-open Linux-app shims as Windows apps, and a self-heal pass purges any existing polluted entries on the next refresh.
 - **Weekly Docker Hub digest watcher** (#180) — picks up silent dockur rebuilds (security patches that don't get a release tag) that the release-tag-only watcher misses.
 - **Internal**: `WinpodxWindow` Qt class decomposed from 2745 lines into a 148-line orchestrator + 10 single-responsibility mixins (#181). Zero behaviour change; maps cleanly to a future Rust port.
-- **Live log-level picker** — Terminal tab gets a `DEBUG / INFO / WARNING / ERROR / CRITICAL` dropdown that retargets the running logger AND persists to `cfg.logging.level`. DEBUG surfaces the chatty per-tick probe / state logs useful for triaging "agent not ready" / "starting" stuck states.
+- **Always-on bottom log bar + live log-level picker.** Two new pieces working together:
+  - A persistent 2-line log ticker at the very bottom of the main window — visible regardless of which page is active. Latest two ``log_signal`` lines (winpodx logger + pod tail when ``cfg.logging.level == "RAW"``) flash there in real time.
+  - Terminal tab gets a `DEBUG / INFO / WARNING / ERROR / CRITICAL / RAW` dropdown that retargets the running logger AND persists to `cfg.logging.level`. **RAW** also enables the parallel `podman logs -f` stream (with `[pod]` prefix), so dockur / QEMU / Windows-side messages flow through both the Terminal full view and the bottom bar — useful for "Windows isn't booting" / "ISO download stuck" / agent-down triage.
+  - Tails are started once at GUI launch and stay running, so the bottom bar updates regardless of which page you're on. The Terminal tab's `Live (app)` / `Live (pod)` / `Stop tail` buttons were removed (now redundant with the always-on design).
 
 ### Added
 
@@ -51,7 +54,7 @@ Maintenance + ergonomics release. Wider curated Windows edition support, headles
 - `check-windows-updates` workflow gains a `:latest` digest drift detector — opens a "silent rebuild" tracking issue when digest changes without a release-tag bump. Two new fields in `config/oem/VERSIONS.txt`: `dockur-digest=` and `dockur-arm-digest=`. (#180)
 - `docs/ARCHITECTURE.md` "Advanced: Custom Windows ISO" section documents the manual `win_version = "custom"` + `compose.yaml` mount workaround for users with their own pre-loaded ISOs. Korean mirror updated. (#178, #184)
 - `CONTRIBUTING.md` "Crediting contributors in Highlights" section codifies the inline `(by @user, #PR)` / `(reported by @user, #issue)` convention used in CHANGELOG Highlights. Korean mirror updated. (#187)
-- New `[logging]` config section with `level` field (`DEBUG | INFO | WARNING | ERROR | CRITICAL`). `setup_logging()` reads it on startup so all winpodx CLI / GUI runs pick up the chosen level. Default `INFO`; unknown values fall back to `INFO` with no rejection. Terminal tab dropdown changes the live logger AND persists to TOML.
+- New `[logging]` config section with `level` field (`DEBUG | INFO | WARNING | ERROR | CRITICAL | RAW`). `setup_logging()` reads it on startup so all winpodx CLI / GUI runs pick up the chosen level. Default `INFO`; unknown values fall back to `INFO` with no rejection. Terminal tab dropdown changes the live logger AND persists to TOML. `RAW` is a winpodx-only meta-level: pins the Python logger to `DEBUG` AND turns on a parallel `podman logs -f` tail in the Terminal so dockur / QEMU / Windows-side output interleaves with winpodx's own log lines (pod-log lines are prefixed `[pod]` and dimmed for distinguishability).
 
 ### Changed
 

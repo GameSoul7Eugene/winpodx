@@ -36,16 +36,12 @@ class NavigationMixin:
         self.pages.setCurrentIndex(index)
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
-        # v0.2.1: auto-start the winpodx app-log tail when the user
-        # navigates to the Tools/Terminal page so they see live program
-        # logs by default rather than just an empty terminal. Stops on
-        # leaving so we don't leak `tail -F` processes.
-        logs_index = 3  # _build_logs_page is the 4th page (Apps/Settings/Tools/Logs/Info)
-        if index == logs_index:
-            if getattr(self, "_tail_proc", None) is None:
-                self._on_follow_app_log()
-        else:
-            self._on_stop_tail()
+        # v0.5.1: tail processes are now always-on (started at
+        # WinpodxWindow.__init__) and feed both the Terminal full
+        # history AND the always-visible bottom log bar. We no
+        # longer manage tail lifecycle on page switches; the
+        # always-on design means the bottom bar keeps updating no
+        # matter which page the user is on.
 
         # Auto-refresh the Info page Health card when the user is looking
         # at it. The probes hit /exec which spawns a child PS, so we keep
