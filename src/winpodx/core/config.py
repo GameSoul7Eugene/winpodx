@@ -8,6 +8,7 @@ section drives the agent-first install flow (see
 
 from __future__ import annotations
 
+import logging
 import platform
 import re
 from dataclasses import dataclass, field
@@ -24,6 +25,36 @@ from winpodx.utils.paths import config_dir
 from winpodx.utils.toml_writer import dumps as toml_dumps
 
 _VALID_BACKENDS = frozenset({"podman", "docker", "libvirt", "manual"})
+
+# Windows edition strings winpodx ships explicit support for. Subset
+# of dockur/windows' full VERSION set, restricted to Windows 10-era
+# kernels and newer (see #178). Pre-Win10 editions (XP / Vista / 7 /
+# 8 / Server 2003-2012) are intentionally excluded — they're out of
+# Microsoft security support, and winpodx's stack (rdprrap multi-
+# session, agent.ps1 modern PowerShell APIs, dockur's RDP shim)
+# targets the Win10+ family. Unknown values are still permitted at
+# the config layer with a warning so bleeding-edge dockur additions
+# winpodx hasn't documented yet still work — validation is
+# strictness=warn, not strictness=reject.
+_KNOWN_WIN_VERSIONS = frozenset(
+    {
+        # Mainstream desktop
+        "11",
+        "10",
+        # LTSC / IoT (long-term servicing — #178 core ask)
+        "ltsc11",
+        "ltsc10",
+        "iot11",
+        # Debloated community builds
+        "tiny11",
+        "tiny10",
+        # Server editions (Win10+ kernel only)
+        "2025",
+        "2022",
+        "2019",
+        "2016",
+    }
+)
 
 # Podman/Docker container name rules: alnum/_/-/., must start with alnum.
 _CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -101,7 +132,15 @@ class PodConfig:
     backend: str = "podman"  # podman | docker | libvirt | manual
     vm_name: str = "RDPWindows"
     container_name: str = "winpodx-windows"
-    win_version: str = "11"  # 11 | 10 | ltsc10 | tiny11 | tiny10
+    # Windows edition picker — passed through to dockur/windows via the
+    # ``VERSION`` env var (see ``compose.py``). Restricted to the
+    # Win10+ kernel family (see ``_KNOWN_WIN_VERSIONS``) — older
+    # editions are out of Microsoft security support and don't match
+    # winpodx's stack assumptions (rdprrap multi-session, agent.ps1
+    # modern APIs). Unknown values pass through with a one-line
+    # WARNING log in ``__post_init__`` so newer dockur releases that
+    # add editions winpodx hasn't documented yet still work.
+    win_version: str = "11"
     cpu_cores: int = 4
     # v0.2.1: default bumped 4 -> 6 GB so the new 25-session default
     # doesn't trip the session-budget warning (2.0 base + 25 × 0.1 ≈
@@ -168,6 +207,19 @@ class PodConfig:
             self.container_name = _DEFAULT_CONTAINER_NAME
         if not isinstance(self.image, str) or not self.image.strip():
             self.image = _default_pod_image()
+        # win_version: keep a string; coerce empty to default; warn (don't
+        # reject) on unknown values so future dockur additions still work.
+        if not isinstance(self.win_version, str) or not self.win_version.strip():
+            self.win_version = "11"
+        else:
+            self.win_version = self.win_version.strip().lower()
+            if self.win_version not in _KNOWN_WIN_VERSIONS:
+                logging.getLogger(__name__).warning(
+                    "win_version=%r not in winpodx's known list (%s); "
+                    "passing through to dockur as-is",
+                    self.win_version,
+                    ", ".join(sorted(_KNOWN_WIN_VERSIONS)),
+                )
         if not isinstance(self.disk_size, str) or not self.disk_size.strip():
             self.disk_size = "64G"
         # storage_path: keep empty (named-volume mode) or coerce to a
