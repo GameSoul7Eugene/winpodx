@@ -91,7 +91,13 @@ jobs:
               continue
             fi
 
-            pending=$(echo " $codes " | grep -oE ' (scheduled|blocked|dispatching|building|signing|finished) ' || true)
+            # `blocked` removed from the pending list: OBS leaves niche
+            # arches (e.g. openSUSE_Factory_RISCV riscv64) in `blocked` state
+            # indefinitely while waiting on deps that never resolve on that
+            # arch. We don't ship RISCV / Factory PowerPC / niche arches, so
+            # waiting for them is pointless — the download step only fetches
+            # RPMs that actually built. Mirror the `broken` handling below.
+            pending=$(echo " $codes " | grep -oE ' (scheduled|dispatching|building|signing|finished) ' || true)
             if [ -n "$pending" ]; then
               sleep 30
               continue
