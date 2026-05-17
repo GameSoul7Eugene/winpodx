@@ -28,6 +28,14 @@ verbatim.
 ### Fixed
 -->
 
+### Added
+
+- **Windows language / region / keyboard configuration.** The pod's installation language, regional format, and keyboard layout are now configurable via `[pod] language / region / keyboard` in `winpodx.toml`. Defaults to `English` / `en-001` / `en-US` (backward compatible with existing configs); set to e.g. `Spanish` / `es-ES` / `es-ES` for a Spanish Windows install. All three fields run through `_DANGEROUS_YAML_CHARS` sanitisation in `PodConfig.__post_init__` and `_yaml_escape` at compose render — same defense-in-depth as the existing `user` / `password` / `home` fields. `docs/INSTALL.md` and `docs/INSTALL.ko.md` document the 10 most common language tuples. Applies only to fresh Windows installations; existing pods need a volume reset + `winpodx setup` re-run. (by @juampe, #201)
+
+### Fixed
+
+- **LICENSE and README.md missing from `.deb` packages.** `pyproject.toml` now ships `LICENSE` and `README.md` to `/usr/share/winpodx/` via the `[tool.hatch.build.targets.wheel.shared-data]` table. The GUI's License tab no longer hits `FileNotFoundError` on Debian/Ubuntu installs. (by @juampe, #201)
+
 ## [0.5.2] - 2026-05-14
 
 Same-day install-path hot-fix release. Two `install.sh` regressions that blocked new installs on common 2025+ distros (Debian 13 Trixie, Ubuntu 24.10+) are fixed, and Atomic Fedora support lands as a single-transaction OBS-layered install path.
