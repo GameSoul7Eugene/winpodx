@@ -592,6 +592,33 @@ def _reaper_thread(session: RDPSession) -> None:
         session.pid_file.unlink(missing_ok=True)
 
 
+def _read_stderr_log(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError as exc:
+        return f"(could not read stderr log {path}: {exc})"
+
+
+def _raise_if_exited_immediately(session: RDPSession) -> None:
+    """Surface FreeRDP clients that die immediately after a successful spawn."""
+    import time
+
+    proc = session.process
+    if proc is None:
+        return
+
+    time.sleep(0.5)
+    if proc.poll() is None:
+        return
+
+    stderr_content = _read_stderr_log(session.stderr_log)
+    if not stderr_content:
+        stderr_content = "(stderr log was empty)"
+    raise RuntimeError(
+        f"FreeRDP exited immediately with rc={proc.returncode}. Stderr:\n{stderr_content}"
+    )
+
+
 def launch_app(
     cfg: Config,
     app_executable: str | None = None,
@@ -699,6 +726,8 @@ def launch_app(
         daemon=True,
     )
     t.start()
+
+    _raise_if_exited_immediately(session)
 
     return session
 

@@ -239,10 +239,15 @@ def _run_app(name: str, file: str | None, wait: bool, *, extra_args: str = "") -
         sys.exit(1)
 
     if name == "desktop":
-        print("Launching Windows desktop...")
-        session = launch_desktop(cfg, extra_args=extra_args)
-        if wait and session.process:
-            session.process.wait()
+        try:
+            session = launch_desktop(cfg, extra_args=extra_args)
+            print(f"Launching Windows desktop... (stderr log: {session.stderr_log})")
+            if wait and session.process:
+                session.process.wait()
+        except RuntimeError as e:
+            notify_error(str(e))
+            print(f"Launch failed: {e}", file=sys.stderr)
+            sys.exit(1)
         return
 
     from winpodx.core.app import find_app
@@ -262,13 +267,14 @@ def _run_app(name: str, file: str | None, wait: bool, *, extra_args: str = "") -
             default_args=app_info.args or None,
             extra_args=extra_args,
         )
+        print(f"Launching {app_info.full_name}... (stderr log: {session.stderr_log})")
 
         if wait and session.process:
             session.process.wait()
             session.pid_file.unlink(missing_ok=True)
     except RuntimeError as e:
         notify_error(str(e))
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"Launch failed: {e}", file=sys.stderr)
         sys.exit(1)
 
 

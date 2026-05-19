@@ -29,7 +29,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
         runner: ["ubuntu-latest"]
         include:
           # aarch64 regression catch — winpodx ships arch-aware code paths
@@ -39,7 +39,7 @@ jobs:
           # versions; we keep aarch64 minimal at the latest Python only
           # so the regression check is fast + cheap. GitHub Actions
           # provides free aarch64 runners for public repos since 2024.
-          - python-version: "3.13"
+          - python-version: "3.14"
             runner: "ubuntu-24.04-arm"
     steps:
       - uses: actions/checkout@v5

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 from pathlib import Path
 
@@ -21,6 +22,9 @@ from winpodx.utils.compat import import_winapps_config
 from winpodx.utils.deps import check_all
 from winpodx.utils.paths import config_dir
 
+COMPOSE_TIMEOUT_DEFAULT_SECS = 1800
+COMPOSE_TIMEOUT_ENV_VAR = "WINPODX_COMPOSE_TIMEOUT_SECS"
+
 __all__ = [
     "_build_compose_content",
     "_build_compose_template",
@@ -35,6 +39,24 @@ __all__ = [
     "handle_rotate_password",
     "handle_setup",
 ]
+
+
+def _compose_timeout_secs() -> int | None:
+    """Return compose command timeout seconds, or None for no timeout."""
+    raw_timeout = os.environ.get(COMPOSE_TIMEOUT_ENV_VAR)
+    if raw_timeout is None:
+        timeout = COMPOSE_TIMEOUT_DEFAULT_SECS
+    else:
+        try:
+            timeout = int(raw_timeout)
+        except ValueError:
+            timeout = COMPOSE_TIMEOUT_DEFAULT_SECS
+
+    if timeout < 0:
+        timeout = COMPOSE_TIMEOUT_DEFAULT_SECS
+    if timeout == 0:
+        return None
+    return timeout
 
 
 def _ensure_oem_token_staged() -> None:
@@ -623,24 +645,30 @@ def _recreate_container(cfg: Config) -> None:
         return
 
     print("\nRecreating container with new settings...")
+    compose_timeout = _compose_timeout_secs()
     # compose down may fail on fresh setup when no container exists yet
     down = sp.run(
         [*compose_cmd, "down"],
         cwd=compose_path.parent,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=compose_timeout,
     )
     if down.returncode != 0 and down.stderr:
         stderr = down.stderr.strip()
         if stderr and "no such" not in stderr.lower():
             print(f"  Warning: compose down returned {down.returncode}: {stderr}")
+    timeout_text = "no cap" if compose_timeout is None else f"{compose_timeout}s"
+    print(
+        f"Running compose up -d (timeout {timeout_text}). "
+        "First-time image pull can take 10+ minutes on slow connections."
+    )
     result = sp.run(
         [*compose_cmd, "up", "-d"],
         cwd=compose_path.parent,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=compose_timeout,
     )
     if result.returncode == 0:
         print("Container started.")

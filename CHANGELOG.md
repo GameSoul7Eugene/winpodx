@@ -32,13 +32,21 @@ verbatim.
 
 - **Windows language / region / keyboard configuration.** The pod's installation language, regional format, and keyboard layout are now configurable via `[pod] language / region / keyboard` in `winpodx.toml`. Defaults to `English` / `en-001` / `en-US` (backward compatible with existing configs); set to e.g. `Spanish` / `es-ES` / `es-ES` for a Spanish Windows install. All three fields run through `_DANGEROUS_YAML_CHARS` sanitisation in `PodConfig.__post_init__` and `_yaml_escape` at compose render — same defense-in-depth as the existing `user` / `password` / `home` fields. `docs/INSTALL.md` and `docs/INSTALL.ko.md` document the 10 most common language tuples. Applies only to fresh Windows installations; existing pods need a volume reset + `winpodx setup` re-run. (by @juampe, #201)
 
+### Changed
+
+- CI matrix now tests Python 3.14 and packages for Ubuntu 26.04 (#206). Closes the untested-platform gap that surfaced in #213 / #214.
+
 ### Fixed
+
+- **Compose up/down timeout is now pull-friendly.** Default compose timeout bumped 120s → 1800s; honors `WINPODX_COMPOSE_TIMEOUT_SECS` env var (`0` = no cap). Fixes #212 reported by @jimed-rand.
 
 - **LICENSE and README.md missing from `.deb` packages.** `pyproject.toml` now ships `LICENSE` and `README.md` to `/usr/share/winpodx/` via the `[tool.hatch.build.targets.wheel.shared-data]` table. The GUI's License tab no longer hits `FileNotFoundError` on Debian/Ubuntu installs. (by @juampe, #201)
 
 - **Qt stylesheet parser warnings at GUI startup.** `main_window.py` combined a bare property declaration (`background: ...`) with full QSS selector rules (`QPushButton { ... }`), which Qt's stylesheet engine rejects. The central widget now carries an `objectName="centralRoot"` and the background rule is scoped to `QWidget#centralRoot { ... }`. No visual change; just silences the `Could not parse stylesheet of object QWidget(...)` warnings in the logs. Library page Launch/Edit buttons also got their inline QSS converted to multi-line blocks for readability while tracking parser warnings. (by @juampe, #203)
 
 - **Dynamic Desktop Window Resolution** - creating a desktop session now resizes the resolution dynamically to the size of the FreeRDP client window. Flag added as default behavior for desktop sessions. Covered by tests. (by @Zeik0s, #197)
+
+- **Launch surfaces FreeRDP stderr on quick-exit; eliminates silent "launched but no window" failure mode.** Helps diagnose Plasma 6 / Wayland and Python 3.14 edge cases. Fixes #213 reported by @mozjacksson + #214 reported by @ismikes.
 
 ## [0.5.2] - 2026-05-14
 
