@@ -91,28 +91,37 @@ class DockerBackend(Backend):
         return "paused" in self._container_state()
 
     def uptime_secs(self) -> int | None:
-        """Seconds since the container was last started, or None on probe failure."""
+        """Seconds since the container was last started, or None on probe failure.
+
+        Falls back to compose-prefixed names the same way the podman
+        backend does — ``docker compose`` follows the same naming
+        convention so the candidate list is identical.
+        """
         import datetime
         import subprocess
 
-        try:
-            result = subprocess.run(
-                [
-                    "docker",
-                    "inspect",
-                    "-f",
-                    "{{.State.StartedAt}}",
-                    self.cfg.pod.container_name,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return None
-        ts = result.stdout.strip()
-        if not ts or result.returncode != 0:
+        candidates = [
+            self.cfg.pod.container_name,
+            f"winpodx_{self.cfg.pod.container_name}",
+            f"winpodx_{self.cfg.pod.container_name}_1",
+        ]
+        ts = ""
+        for name in candidates:
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", "-f", "{{.State.StartedAt}}", name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                return None
+            if result.returncode == 0 and result.stdout.strip():
+                ts = result.stdout.strip()
+                break
+
+        if not ts:
             return None
         ts = ts.replace("Z", "+00:00")
         if "." in ts:
@@ -125,6 +134,8 @@ class DockerBackend(Backend):
         try:
             started = datetime.datetime.fromisoformat(ts)
         except ValueError:
+            return None
+        if started.year < 2000:
             return None
         now = datetime.datetime.now(tz=started.tzinfo)
         return max(0, int((now - started).total_seconds()))

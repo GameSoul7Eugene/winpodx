@@ -12,6 +12,13 @@ from winpodx.core.pod.health import check_rdp_port
 
 log = logging.getLogger(__name__)
 
+# Rate-limit guard for the "uptime probe returned None" warning: log
+# once per process, not once per poll. ``pod_status()`` is called every
+# few seconds from the install.sh wait-ready loop, the tray, and the
+# GUI status timer; a per-poll WARN floods stderr during first-boot
+# Sysprep when uptime parsing is genuinely unavailable.
+_UPTIME_NONE_WARNING_FIRED = False
+
 
 class PodState(Enum):
     STOPPED = "stopped"
@@ -102,30 +109,33 @@ def pod_status(cfg: Config) -> PodStatus:
     # user noticed). Probe the backend's container uptime: under the
     # floor → STARTING, past it → UNRESPONSIVE.
     #
-    # Unknown-uptime fallback (post-smoke v0.5.5): treat ``None`` as
-    # UNRESPONSIVE on container backends. The dockur first-boot window
-    # is owned by ``install.sh`` (`[1-3/3]` checkpoints, no GUI / tray
-    # active), so by the time a probe returns ``None`` from the running
-    # GUI, the container has clearly been up — defaulting to STARTING
-    # was the bug we just hit on real-Windows smoke: uptime parse
-    # failure → STARTING → user thinks pod is still booting after
-    # 50 min. Fall back to STARTING only on backends that don't
-    # implement uptime_secs at all (libvirt / manual return None
-    # because they override nothing; container backends return a real
-    # value or None only on probe failure).
+    # Unknown-uptime (``backend.uptime_secs() is None``): fall back to
+    # STARTING. The post-#221 attempt to classify None-on-container as
+    # UNRESPONSIVE flooded stderr during first-boot Sysprep (where
+    # ``podman inspect`` legitimately can't yet hand back a parseable
+    # ``StartedAt``) and the user got hundreds of "UNRESPONSIVE"
+    # log lines while the ISO was still downloading. Better to under-
+    # report UNRESPONSIVE during install (caller flow handles it via
+    # ``wait-ready``'s explicit phases) than over-report and spam the
+    # log + trigger false-positive recovery. We still log once so a
+    # genuinely broken uptime probe is visible during real idle-stall
+    # debugging.
     uptime = None
     try:
         uptime = backend.uptime_secs()
     except Exception as e:  # pragma: no cover - defensive
         log.debug("uptime_secs probe failed: %s", e)
-    if uptime is not None and uptime >= _UNRESPONSIVE_UPTIME_FLOOR_SECS:
-        return PodStatus(state=PodState.UNRESPONSIVE, ip=cfg.rdp.ip)
-    if uptime is None and cfg.pod.backend in ("podman", "docker"):
-        log.warning(
-            "Container backend %r did not return an uptime; classifying as "
-            "UNRESPONSIVE on the assumption that an RDP miss without uptime "
-            "data is a stalled long-running pod, not a fresh boot.",
-            cfg.pod.backend,
-        )
+    if uptime is None:
+        global _UPTIME_NONE_WARNING_FIRED
+        if not _UPTIME_NONE_WARNING_FIRED and cfg.pod.backend in ("podman", "docker"):
+            log.warning(
+                "Container backend %r returned no uptime from inspect. "
+                "Falling back to STARTING; UNRESPONSIVE auto-recovery will "
+                "not fire for this backend until probe is fixed.",
+                cfg.pod.backend,
+            )
+            _UPTIME_NONE_WARNING_FIRED = True
+        return PodStatus(state=PodState.STARTING, ip=cfg.rdp.ip)
+    if uptime >= _UNRESPONSIVE_UPTIME_FLOOR_SECS:
         return PodStatus(state=PodState.UNRESPONSIVE, ip=cfg.rdp.ip)
     return PodStatus(state=PodState.STARTING, ip=cfg.rdp.ip)

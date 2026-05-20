@@ -171,14 +171,23 @@ def test_pod_status_starting_when_uptime_unknown_on_non_container_backend():
     assert status.state == PodState.STARTING
 
 
-def test_pod_status_unresponsive_when_uptime_unknown_on_container_backend():
+def test_pod_status_starting_when_uptime_unknown_on_container_backend():
     """Container backend (podman / docker) returning None from
-    ``uptime_secs`` means the probe parse failed on a known-running
-    container — by the time the GUI / tray polls, first-boot Sysprep
-    has already finished (install.sh owns that window). Treating
-    parse failure as "still STARTING after 50 min" was the bug in the
-    pre-fix smoke run (#219 follow-up), so an unknown uptime on a
-    container backend now resolves to UNRESPONSIVE."""
+    ``uptime_secs`` must fall back to STARTING. The earlier post-#221
+    attempt to classify None-on-container as UNRESPONSIVE flooded
+    stderr during the first-boot Sysprep window with a WARN every two
+    seconds while podman inspect legitimately couldn't yet hand back
+    a parseable ``StartedAt``. Under-reporting UNRESPONSIVE during
+    install is fine; over-reporting it spams the log + triggers
+    false-positive auto-recovery. The function logs once when the
+    fallback triggers so a genuinely broken uptime probe is still
+    visible."""
+    # Reset the module-level guard so the test asserts the warn path
+    # the same way on every run.
+    import winpodx.core.pod.backend as _backend_mod
+
+    _backend_mod._UPTIME_NONE_WARNING_FIRED = False
+
     status = _patched_pod_status(
         running=True,
         paused=False,
@@ -186,7 +195,7 @@ def test_pod_status_unresponsive_when_uptime_unknown_on_container_backend():
         uptime=None,
         backend_name="podman",
     )
-    assert status.state == PodState.UNRESPONSIVE
+    assert status.state == PodState.STARTING
 
 
 def test_pod_status_paused_short_circuits_before_rdp_probe():
