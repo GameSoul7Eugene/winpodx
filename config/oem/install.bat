@@ -1,7 +1,7 @@
 @echo off
 REM First-boot OEM setup for winpodx Windows guest. Runs once during dockur's unattended install. Every action must stay idempotent - there is no guest-side re-run channel in 0.1.6 (push/exec bridge planned for a later release).
 
-set WINPODX_OEM_VERSION=24
+set WINPODX_OEM_VERSION=25
 
 echo [winpodx] Starting post-install configuration (version %WINPODX_OEM_VERSION%)...
 
@@ -477,15 +477,33 @@ REM 127.0.0.1:8765:8765/tcp mapping is loopback on the host, and the
 REM QEMU slirp net is private to the container.
 REM
 REM HttpListener.Start() needs a urlacl entry to bind ``+``; without
-REM it the bind fails with "conflicts with an existing registration".
-REM listen=yes + user=Everyone gives the autologon User permission to
-REM listen on this prefix. Delete-then-add keeps it idempotent across
-REM reinstalls (clears any stale registration from a previous SDDL).
-REM Also clean up the old loopback-only ACL that pre-2026-04-30 builds
-REM may have left.
-netsh http delete urlacl url=http://127.0.0.1:8765/ >nul 2>&1
-netsh http delete urlacl url=http://+:8765/ >nul 2>&1
-netsh http add urlacl url=http://+:8765/ user=Everyone listen=yes >nul 2>&1
+REM it the bind fails with "conflicts with an existing registration on
+REM the machine" because a non-admin process (the autologon User the
+REM agent runs as) cannot reserve a strong-wildcard prefix without a
+REM pre-existing reservation it is permitted to use.
+REM
+REM #269 (ismikes, Kubuntu 26.04): agent.log showed the bind failing
+REM with exactly that conflict on every boot even though install.bat
+REM ran to completion. Root cause: the prior `user=Everyone` form +
+REM hidden `>nul 2>&1` masked a failed / locale-dependent reservation.
+REM Hardened below:
+REM   - sddl=D:(A;;GX;;;WD) reserves for the World (Everyone) SID
+REM     S-1-1-0 directly, locale-independent (the literal string
+REM     "Everyone" is localized on non-English Windows and the netsh
+REM     parse silently no-ops there). GX = GENERIC_EXECUTE = the
+REM     register/listen right HttpListener needs.
+REM   - delete every overlapping 8765 reservation (strong +, weak *,
+REM     loopback) first so a stale differently-owned entry can't win.
+REM   - results logged to setup.log (not >nul) so a failure is visible.
+REM   - show urlacl after, so the actual post-state is in the log.
+echo [agent-install] step=urlacl status=enter>>"%SETUP_LOG%"
+netsh http delete urlacl url=http://127.0.0.1:8765/ >>"%SETUP_LOG%" 2>&1
+netsh http delete urlacl url=http://*:8765/ >>"%SETUP_LOG%" 2>&1
+netsh http delete urlacl url=http://+:8765/ >>"%SETUP_LOG%" 2>&1
+netsh http add urlacl url=http://+:8765/ sddl=D:(A;;GX;;;WD) >>"%SETUP_LOG%" 2>&1
+echo [agent-install] urlacl add rc=%ERRORLEVEL%>>"%SETUP_LOG%"
+netsh http show urlacl url=http://+:8765/ >>"%SETUP_LOG%" 2>&1
+echo [agent-install] step=urlacl status=exit>>"%SETUP_LOG%"
 
 REM Register HKCU\Run via PowerShell instead of `reg add`. Three reasons
 REM the cmd-quoting path bit users pre-OEM-v20:

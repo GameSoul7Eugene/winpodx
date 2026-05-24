@@ -227,26 +227,59 @@ function Invoke-ExecScript([string]$scriptB64, [int]$timeoutSec) {
 # token lands would race the first auth check on a real /exec call.
 $script:Token = Wait-Token
 
+# Bind with a bounded retry loop. install.bat (#269 fix) reserves the
+# urlacl for the World SID (S-1-1-0 / sddl WD) just before spawning the
+# agent, but the agent's first spawn can race that reservation landing
+# in HTTP.sys, and an autologon-retry session can re-spawn before the
+# OS finished applying the ACL. A few short retries absorb that race
+# without masking a genuine persistent conflict (which still ends in a
+# FATAL + the full urlacl state dumped to agent.log so the real owner
+# of the conflicting reservation is visible).
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add($script:Prefix)
-try {
-    $listener.Start()
-} catch {
-    # HttpListener.Start() fails with "Failed to listen on prefix ...
-    # because it conflicts with an existing registration on the machine"
-    # when the URL ACL is owned by a different user (stale registration
-    # from a previous install / different SDDL). install.bat pre-registers
-    # the URL ACL with user=Everyone for exactly this reason -- but if
-    # someone deleted that or the install.bat block didn't run, we want
-    # the failure visible in agent.log instead of a silent process exit.
-    $err = "HttpListener.Start() failed: $($_.Exception.Message)"
+$bindAttempts = 5
+$bound = $false
+for ($i = 1; $i -le $bindAttempts; $i++) {
+    try {
+        $listener.Start()
+        $bound = $true
+        break
+    } catch {
+        $msg = $_.Exception.Message
+        try {
+            Add-Content -Path $script:LogPath -Value (
+                "$((Get-Date).ToUniversalTime().ToString('o')) WARN " +
+                "HttpListener.Start() attempt $i/$bindAttempts failed: $msg"
+            ) -ErrorAction SilentlyContinue
+        } catch { }
+        if ($i -lt $bindAttempts) {
+            Start-Sleep -Seconds 3
+            # Re-create the listener -- a failed Start() can leave the
+            # instance in a state that rejects a second Start().
+            $listener = [System.Net.HttpListener]::new()
+            $listener.Prefixes.Add($script:Prefix)
+        }
+    }
+}
+if (-not $bound) {
+    # Persistent failure. Dump the actual urlacl reservation state so the
+    # next debugging round sees WHICH SID owns the conflicting prefix --
+    # the agent runs as a non-admin User and cannot re-register the ACL
+    # itself (needs admin), so the fix has to land in install.bat.
+    $aclState = ''
+    try {
+        $aclState = (& netsh http show urlacl url=$($script:Prefix) 2>&1 | Out-String).Trim()
+    } catch { }
     try {
         Add-Content -Path $script:LogPath -Value (
-            "$((Get-Date).ToUniversalTime().ToString('o')) FATAL $err" +
-            "  hint: run 'netsh http add urlacl url=$($script:Prefix) user=Everyone listen=yes' as admin"
+            "$((Get-Date).ToUniversalTime().ToString('o')) FATAL " +
+            "HttpListener.Start() failed after $bindAttempts attempts on $($script:Prefix)." +
+            "  hint: install.bat should have reserved this via " +
+            "'netsh http add urlacl url=$($script:Prefix) sddl=D:(A;;GX;;;WD)' as admin." +
+            "  current urlacl state: $aclState"
         ) -ErrorAction SilentlyContinue
     } catch { }
-    throw
+    throw "HttpListener.Start() failed after $bindAttempts attempts on $($script:Prefix)"
 }
 
 try {
