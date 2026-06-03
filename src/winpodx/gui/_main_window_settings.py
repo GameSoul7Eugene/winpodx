@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 from winpodx.core.config import Config
 from winpodx.core.i18n import tr
-from winpodx.gui._widget_helpers import add_shadow, make_page_heading, make_warning_callout
+from winpodx.gui._widget_helpers import add_shadow, make_page_header, make_warning_callout
 from winpodx.gui.theme import (
     BTN_PRIMARY,
     CHECKBOX,
@@ -201,11 +201,19 @@ class SettingsPageMixin:
 
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(SPACE_XXL, SPACE_XL, SPACE_XXL, SPACE_XL)
+        layout.setContentsMargins(SPACE_XXL, 0, SPACE_XXL, SPACE_XL)
         layout.setSpacing(SPACE_M)
 
+        save_btn = QPushButton(tr("Save Settings"))
+        save_btn.setStyleSheet(BTN_PRIMARY)
+        save_btn.setFixedWidth(180)
+        save_btn.clicked.connect(self._save_settings)
         layout.addWidget(
-            make_page_heading(tr("Settings"), tr("Configure RDP and container settings"))
+            make_page_header(
+                tr("Settings"),
+                tr("Configure RDP and container settings"),
+                actions_widget=save_btn,
+            )
         )
 
         cols = QHBoxLayout()
@@ -602,7 +610,7 @@ class SettingsPageMixin:
         applies_now_header = QLabel(tr("Applies immediately"))
         applies_now_header.setStyleSheet(
             f"background: transparent; color: {C.SUBTEXT0}; "
-            f"font-size: {FONT_CAPTION}px; font-weight: bold;"
+            f"font-size: {FONT_CAPTION}px; font-weight: 500;"
         )
         layout.addWidget(applies_now_header)
         applies_now_caption = QLabel(
@@ -706,12 +714,6 @@ class SettingsPageMixin:
 
         layout.addSpacing(SPACE_L)
 
-        save_btn = QPushButton(tr("Save Settings"))
-        save_btn.setStyleSheet(BTN_PRIMARY)
-        save_btn.setFixedWidth(180)
-        save_btn.clicked.connect(self._save_settings)
-        layout.addWidget(save_btn)
-
         save_caption = QLabel(
             tr("Persists the form fields above. The ‘Applies immediately’ controls save on change.")
         )
@@ -752,7 +754,7 @@ class SettingsPageMixin:
         header = QLabel(tr("◨  Performance Tuning"))
         header.setStyleSheet(
             f"background: transparent; color: {C.BLUE}; "
-            f"font-size: {FONT_HEADER}px; font-weight: bold;"
+            f"font-size: {FONT_HEADER}px; font-weight: 600;"
         )
         layout.addWidget(header)
 
@@ -785,7 +787,7 @@ class SettingsPageMixin:
         summary_header = QLabel(tr("Detection summary (this host)"))
         summary_header.setStyleSheet(
             f"background: transparent; color: {C.SUBTEXT0}; "
-            f"font-size: {FONT_CAPTION}px; font-weight: bold;"
+            f"font-size: {FONT_CAPTION}px; font-weight: 500;"
         )
         layout.addWidget(summary_header)
 
@@ -836,7 +838,7 @@ class SettingsPageMixin:
         header = QLabel(title)
         header.setStyleSheet(
             f"background: transparent; color: {C.BLUE}; "
-            f"font-size: {FONT_HEADER}px; font-weight: bold;"
+            f"font-size: {FONT_HEADER}px; font-weight: 600;"
         )
         layout.addWidget(header)
 

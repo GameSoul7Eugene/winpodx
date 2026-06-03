@@ -77,7 +77,7 @@ class HeaderMixin:
         logo_text = QLabel("WinPodX")
         logo_text.setStyleSheet(
             f"background: transparent; color: {C.TEXT};"
-            " font-size: 16px; font-weight: bold;"
+            " font-size: 16px; font-weight: 600;"
             " letter-spacing: 0px;"
         )
         layout.addWidget(logo_text)
@@ -96,10 +96,10 @@ class HeaderMixin:
             ("Tools", 2),
             ("Terminal", 3),
             ("Info", 4),
-            ("License", 5),
-            # Devices page is appended last so the nav-position == page-index
+            ("Devices", 5),
+            # License page is appended last so the nav-position == page-index
             # invariant _switch_page relies on holds (see _main_window_nav).
-            ("Devices", 6),
+            ("License", 6),
         ]:
             btn = QPushButton(tr(label))
             btn.setCheckable(True)
@@ -138,14 +138,14 @@ class HeaderMixin:
         # 15s status_timer that drives pod_dot, plus a quick agent probe.
         self.agent_dot = QLabel("A")
         self.agent_dot.setStyleSheet(
-            f"background: transparent; color: {C.OVERLAY0}; font-size: 10px; font-weight: bold;"
+            f"background: transparent; color: {C.OVERLAY0}; font-size: 10px; font-weight: 500;"
         )
         self.agent_dot.setToolTip(tr("Guest agent (HTTP /health) — probing…"))
         chip_l.addWidget(self.agent_dot)
 
         self.rdp_dot = QLabel("R")
         self.rdp_dot.setStyleSheet(
-            f"background: transparent; color: {C.OVERLAY0}; font-size: 10px; font-weight: bold;"
+            f"background: transparent; color: {C.OVERLAY0}; font-size: 10px; font-weight: 500;"
         )
         self.rdp_dot.setToolTip(tr("RDP port (3390) — probing…"))
         chip_l.addWidget(self.rdp_dot)

@@ -47,6 +47,7 @@ from winpodx.gui.theme import (
     SPACE_M,
     SPACE_S,
     SPACE_XL,
+    SPACE_XS,
     C,
     avatar_color,
 )
@@ -97,7 +98,7 @@ def make_source_badge(app: AppInfo) -> QLabel | None:
     badge.setStyleSheet(
         f"background: {bg}; color: {fg};"
         " border-radius: 7px;"
-        " font-size: 9px; font-weight: bold;"
+        " font-size: 9px; font-weight: 500;"
         " padding: 2px 7px;"
         " letter-spacing: 0px;"
     )
@@ -156,7 +157,7 @@ def make_app_avatar(app: AppInfo, size: int, *, radius: int, font_size: int) -> 
         f"background: {color};"
         f" color: {C.CRUST};"
         f" border-radius: {radius}px;"
-        f" font-size: {font_size}px; font-weight: bold;"
+        f" font-size: {font_size}px; font-weight: 600;"
     )
     return avatar
 
@@ -192,7 +193,7 @@ def show_toast(
         f"QLabel#winpodxToast {{"
         f" background: {C.SURFACE0}; color: {accent};"
         f" border: 1px solid {accent}; border-radius: {RADIUS_M}px;"
-        f" font-size: {FONT_BODY}px; font-weight: 600; padding: 8px 16px; }}"
+        f" font-size: {FONT_BODY}px; font-weight: 500; padding: 8px 16px; }}"
     )
     toast.adjustSize()
     add_shadow(toast, blur=18, y=4, alpha=70)
@@ -306,7 +307,7 @@ def make_warning_callout(text: str, *, level: str = "warn") -> QFrame:
     row.setContentsMargins(12, 10, 12, 10)
     row.setSpacing(10)
     icon = QLabel(glyph)
-    icon.setStyleSheet(f"color: {accent}; font-size: 15px; font-weight: bold;")
+    icon.setStyleSheet(f"color: {accent}; font-size: 15px; font-weight: 600;")
     icon.setAlignment(Qt.AlignmentFlag.AlignTop)
     row.addWidget(icon)
     label = QLabel(text)
@@ -317,11 +318,11 @@ def make_warning_callout(text: str, *, level: str = "warn") -> QFrame:
 
 
 def make_page_heading(title: str, subtitle: str = "") -> QWidget:
-    """Build a consistent page title/subtitle block."""
+    """Build a title/subtitle block for use inside a page header."""
     holder = QWidget()
     layout = QVBoxLayout(holder)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(SPACE_S)
+    layout.setSpacing(SPACE_XS)
 
     title_lbl = QLabel(title)
     title_lbl.setStyleSheet(PAGE_TITLE)
@@ -334,6 +335,25 @@ def make_page_heading(title: str, subtitle: str = "") -> QWidget:
         layout.addWidget(subtitle_lbl)
 
     return holder
+
+
+def make_page_header(
+    title: str,
+    subtitle: str = "",
+    *,
+    actions_widget: QWidget | None = None,
+) -> QWidget:
+    """Build the shared page header with optional right-aligned actions."""
+    header = QWidget()
+    layout = QHBoxLayout(header)
+    layout.setContentsMargins(0, 16, 0, 0)
+    layout.setSpacing(16)
+
+    layout.addWidget(make_page_heading(title, subtitle), 1, Qt.AlignmentFlag.AlignTop)
+    if actions_widget is not None:
+        layout.addWidget(actions_widget, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+
+    return header
 
 
 def make_section_label(text: str) -> QLabel:
@@ -364,8 +384,7 @@ def make_empty_panel(
     title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
     title_lbl.setWordWrap(True)
     title_lbl.setStyleSheet(
-        f"background: transparent; color: {C.SUBTEXT1}; "
-        f"font-size: {FONT_BODY}px; font-weight: bold;"
+        f"background: transparent; color: {C.SUBTEXT1}; font-size: {FONT_BODY}px; font-weight: 500;"
     )
     layout.addWidget(title_lbl)
 
