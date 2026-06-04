@@ -64,8 +64,16 @@
         <p data-i18n-html="feat.seamless.assoc.body">Double-click a <code>.docx</code> in your file manager and Word opens. The reverse works too — see below.</p>
       </div>
       <div class="block">
+        <h3 data-i18n="feat.seamless.menugroup.title">One tidy menu folder</h3>
+        <p data-i18n-html="feat.seamless.menugroup.body">Every Windows app lands in a single <code>WinPodX</code> menu folder (Wine-style) instead of scattering 50+ entries across native categories like Office and Graphics. Menu search still finds each app by name.</p>
+      </div>
+      <div class="block">
         <h3 data-i18n="feat.seamless.multi.title">Multi-session RDP</h3>
         <p data-i18n-html="feat.seamless.multi.body">The bundled <a href="https://github.com/kernalix7/rdprrap">rdprrap</a> auto-enables up to 25 independent RDP sessions, so multiple apps run truly in parallel. RAIL prerequisites are set automatically during the unattended install.</p>
+      </div>
+      <div class="block">
+        <h3 data-i18n="feat.seamless.multimon.title">Multi-monitor RAIL</h3>
+        <p data-i18n-html="feat.seamless.multimon.body">Remote-app windows span multiple displays by default (<code>rdp.multimon</code>) — drag a window onto a second monitor and it keeps taking input, no dead window on the other screen.</p>
       </div>
     </div>
   </section>
@@ -103,6 +111,10 @@
         <h3 data-i18n="feat.zeroconf.backend.title">Multi-backend</h3>
         <p data-i18n="feat.zeroconf.backend.body">Podman (default), Docker, or a manual RDP endpoint — pick at setup.</p>
       </div>
+      <div class="block">
+        <h3 data-i18n="feat.zeroconf.thinimage.title">Thin AppImage</h3>
+        <p data-i18n-html="feat.zeroconf.thinimage.body">The AppImage is a lean build — Python, Qt, and the FreeRDP client only. It uses the host's <code>podman</code> / <code>docker</code> instead of bundling the whole container stack, so it stays small and plays nicely with rootless setups.</p>
+      </div>
     </div>
   </section>
 
@@ -118,7 +130,7 @@
       <div class="card"><h3><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24"><use href="#i-hdd"/></svg></span><span data-i18n="feat.peripherals.storage.title">Storage &amp; devices</span></h3><ul>
         <li data-i18n="feat.peripherals.storage.li1">USB drives auto-mapped to drive letters (E:, F:, …)</li>
         <li data-i18n="feat.peripherals.storage.li2">Drives plugged in mid-session resolve, subfolders work</li>
-        <li data-i18n="feat.peripherals.storage.li3">Live USB device passthrough (host ↔ guest switcher)</li>
+        <li data-i18n="feat.peripherals.storage.li3">USB / PCI device passthrough (CLI, GUI Devices tab, tray switcher) — USB hot-plugs live</li>
         <li data-i18n="feat.peripherals.storage.li4">Smart DPI scaling from GNOME / KDE / Sway / Hyprland / Cinnamon</li>
       </ul></div>
     </div>
@@ -149,7 +161,7 @@
         <li data-i18n="feat.automation.polish.li1">Host-adaptive Windows-on-KVM tuning profile</li>
         <li data-i18n="feat.automation.polish.li2">Time sync after host sleep/wake</li>
         <li data-i18n="feat.automation.polish.li3">Multilingual UI (en / ko / zh / ja / de / fr / it)</li>
-        <li data-i18n="feat.automation.polish.li4">Qt6 GUI: Apps / Settings / Tools / Terminal / Info + tray</li>
+        <li data-i18n="feat.automation.polish.li4">Start-menu Qt6 GUI: Dashboard (live Pod / RAM / CPU / disk) · All apps · Devices · Settings + tray</li>
       </ul></div>
     </div>
     <p class="lead cta-lead"><a href="https://github.com/kernalix7/winpodx/blob/main/docs/FEATURES.md" data-i18n="feat.automation.docs_link">Deep dives in the docs →</a></p>

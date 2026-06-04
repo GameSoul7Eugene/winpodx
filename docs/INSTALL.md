@@ -35,6 +35,8 @@ WINPODX_REF=main  curl -fsSL https://raw.githubusercontent.com/kernalix7/winpodx
 WINPODX_REF=vX.Y.Z curl -fsSL https://raw.githubusercontent.com/kernalix7/winpodx/main/install.sh | bash
 ```
 
+> **Upgrading.** Re-running `install.sh` (or upgrading the package) installs the new version in place. A running system tray / GUI restarts itself automatically so the new version applies — no manual restart needed. The Windows pod keeps running throughout.
+
 ## Manual install (skip provisioning)
 
 For users who want to install the binary now and customize the Windows guest later (pick edition / language / debloat / tuning knobs before the ~7.5 GB ISO download + Sysprep + OEM apply kicks off), pass `--manual`:
@@ -212,9 +214,11 @@ The PKGBUILD lives at [`packaging/aur/PKGBUILD`](../packaging/aur/PKGBUILD); eac
 
 A distro-agnostic AppImage of WinPodX ships as a release asset on every tagged release. **0.6.0 redesigned this as a Thin AppImage (item A).** Pre-0.6.0 the AppImage was a ~150 MB fat bundle that carried the entire container stack (Podman + podman-compose + conmon + crun + netavark + aardvark-dns + pasta + passt + slirp4netns + transitive libs) into the AppImage's `PATH` / `LD_LIBRARY_PATH`. That shadowed and poisoned the host's working stack on every distro that already had a podman — `it seems that you do not have podman installed` on Ubuntu 26.04 (#357), `OPENSSL_3.4.0 not found` from aardvark-dns on Fedora Bluefin (#363), and similar elsewhere. 0.6.0 **removes the root cause** by dropping the entire container stack from the AppImage. The current bundle carries only what is safe to bundle — Python 3, winpodx, Qt6 (PySide6), and the FreeRDP 3 client (`xfreerdp`, `wlfreerdp`, `sdl-freerdp`) — and uses the host's container runtime via standard `PATH` resolution. AppImage shrinks ~150 MB → ~50 MB.
 
+> **FreeRDP client source.** The FreeRDP client source is selectable, and auto-discovery prefers the Flatpak client (`com.freerdp.FreeRDP`) with the native client (`xfreerdp` / `wlfreerdp` / `sdl-freerdp` on `PATH`) as a fallback (#366 / #393).
+
 Host-side requirements:
 
-- A container runtime installed via your distro's package manager: **`podman ≥ 4` recommended**, `docker` or `libvirt` also supported. Use the same `install.sh` (RPM / DEB / AUR) one-liner installs above if you don't have one yet.
+- A container runtime installed via your distro's package manager: **`podman ≥ 4` recommended**, `docker` also supported (the manual backend uses an existing RDP host instead). Use the same `install.sh` (RPM / DEB / AUR) one-liner installs above if you don't have one yet.
 - `/dev/kvm` exposed by the host kernel (most distros do this by default once VT-x / AMD-V is enabled in BIOS).
 - The current user belongs to the `kvm` group (and `/etc/subuid` + `/etc/subgid` entries exist for rootless Podman — usually preconfigured on modern distros; check with `cat /etc/subuid`).
 
@@ -271,7 +275,7 @@ nix profile install github:kernalix7/winpodx
 inputs.winpodx.url = "github:kernalix7/winpodx";
 ```
 
-The wrapper bundles FreeRDP, podman / podman-compose, iproute2 and libnotify, so the default Podman backend works out of the box. The Docker and libvirt backends still require the respective tools to be present on the host.
+The wrapper bundles FreeRDP, podman / podman-compose, iproute2 and libnotify, so the default Podman backend works out of the box. The Docker backend still requires Docker to be present on the host; the manual backend connects to an RDP host you provide.
 
 ## From source
 
