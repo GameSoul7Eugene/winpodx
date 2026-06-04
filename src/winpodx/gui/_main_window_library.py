@@ -140,8 +140,8 @@ class LibraryPageMixin:
         self.search_box.setPlaceholderText(tr("Search apps by name..."))
         self.search_box.setStyleSheet(SEARCH_BAR)
         self.search_box.setMinimumHeight(46)
-        self.search_box.setMinimumWidth(420)
-        self.search_box.setMaximumWidth(720)
+        self.search_box.setMinimumWidth(360)
+        self.search_box.setMaximumWidth(600)
         self.search_box.addAction(
             load_icon("search", C.SUBTEXT0, 18),
             QLineEdit.ActionPosition.LeadingPosition,
@@ -248,6 +248,22 @@ class LibraryPageMixin:
         launcher_layout = QVBoxLayout(self.app_list_container)
         launcher_layout.setContentsMargins(0, 0, 0, 0)
         launcher_layout.setSpacing(SPACE_XL)
+
+        # Command results -- the hero doubles as a command bar: typing a query
+        # that matches an action (open a page, suspend/resume the pod, ...)
+        # surfaces it here as a clickable row. Hidden when nothing matches.
+        self._commands_section = QWidget()
+        self._commands_section.setStyleSheet("background: transparent;")
+        cmd_outer = QVBoxLayout(self._commands_section)
+        cmd_outer.setContentsMargins(0, 0, 0, 0)
+        cmd_outer.setSpacing(SPACE_M)
+        cmd_outer.addWidget(make_section_label(tr("Commands")))
+        self._commands_layout = QVBoxLayout()
+        self._commands_layout.setContentsMargins(0, 0, 0, 0)
+        self._commands_layout.setSpacing(SPACE_S)
+        cmd_outer.addLayout(self._commands_layout)
+        self._commands_section.setVisible(False)
+        launcher_layout.addWidget(self._commands_section)
 
         # "Running" live-session strip -- winpodx knows what's actually running
         # (RDP session tracking), so surface it at the very top: a chip per live
@@ -478,6 +494,61 @@ class LibraryPageMixin:
         except Exception:  # noqa: BLE001 -- best-effort, never break the UI
             pass
 
+    def _command_specs(self):
+        """Quick actions the hero command bar can run (label, icon, handler).
+        Reuses existing tr() labels + handlers from sibling mixins."""
+        return [
+            # Page indices match the QStackedWidget order in main_window._build_ui
+            # (Dashboard=0, All apps=1, then these). Keep in sync with the nav.
+            (tr("Settings"), "gear", lambda: self._switch_page(2)),
+            (tr("Tools"), "clean", lambda: self._switch_page(3)),
+            (tr("Terminal / Logs"), "prompt", lambda: self._switch_page(4)),
+            (tr("Info"), "pending", lambda: self._switch_page(5)),
+            (tr("Devices"), "hardware", lambda: self._switch_page(6)),
+            (tr("License"), "diamond", lambda: self._switch_page(7)),
+            (tr("Suspend Pod"), "pause", self._on_suspend),
+            (tr("Resume Pod"), "play", self._on_resume),
+            (tr("Full Desktop"), "desktop", self._on_open_desktop),
+            (tr("Refresh Apps"), "refresh", self._on_refresh_apps),
+        ]
+
+    def _make_command_row(self, label: str, icon: str, handler) -> QWidget:
+        row = QFrame()
+        row.setObjectName("cmdRow")
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
+        row.setStyleSheet(
+            f"QFrame#cmdRow {{ background: {C.SURFACE0}; border: 1px solid {C.SURFACE2};"
+            " border-radius: 10px; }"
+            f"QFrame#cmdRow:hover {{ border-color: {C.BLUE}; }}"
+        )
+        h = QHBoxLayout(row)
+        h.setContentsMargins(SPACE_M, SPACE_S, SPACE_M, SPACE_S)
+        h.setSpacing(SPACE_M)
+        ic = QLabel()
+        ic.setPixmap(load_icon(icon, C.SUBTEXT1, 16).pixmap(16, 16))
+        ic.setStyleSheet("background: transparent;")
+        h.addWidget(ic)
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"background: transparent; color: {C.TEXT}; font-size: 13px;")
+        h.addWidget(lbl)
+        h.addStretch()
+        row.mousePressEvent = lambda _e, fn=handler: fn()
+        return row
+
+    def _refresh_commands(self, q: str) -> None:
+        """Show command rows matching the query (the hero acts as a command bar)."""
+        if not hasattr(self, "_commands_layout"):
+            return
+        self._clear_layout(self._commands_layout)
+        matches = []
+        if q:
+            for label, icon, handler in self._command_specs():
+                if q in label.lower():
+                    matches.append((label, icon, handler))
+        self._commands_section.setVisible(bool(matches))
+        for label, icon, handler in matches[:5]:
+            self._commands_layout.addWidget(self._make_command_row(label, icon, handler))
+
     def _on_toggle_pin_app(self, app: AppInfo) -> None:
         if launcher_state.is_pinned(app.name):
             launcher_state.unpin(app.name)
@@ -569,9 +640,18 @@ class LibraryPageMixin:
         panel.setMinimumHeight(220)
         return panel
 
+    def _grid_cols(self) -> int:
+        """Column count for the tile grid, derived from the available width so
+        tiles never force a horizontal scrollbar on narrow / scaled windows."""
+        pages = getattr(self, "pages", None)
+        width = pages.width() if pages is not None else 1100
+        content = max(320, width - 80)  # page horizontal margins
+        return max(3, min(6, content // 128))  # ~128px per tile
+
     def _populate_grid(self, apps: list[AppInfo]) -> None:
         """Grid view - Start-menu-style icon tiles (dense)."""
-        cols = 6
+        cols = self._grid_cols()
+        self._current_grid_cols = cols
         self.app_list_layout.setSpacing(SPACE_L)
         grid = QGridLayout()
         grid.setHorizontalSpacing(SPACE_S)
@@ -595,6 +675,17 @@ class LibraryPageMixin:
         grid_widget.setLayout(grid)
         self.app_list_layout.addWidget(grid_widget)
         self.app_list_layout.addStretch()
+
+    def _reflow_library(self) -> None:
+        """Re-flow the tile grid when the responsive column count changes on
+        resize (avoids a horizontal scrollbar on narrow windows). No-op in
+        list view or when the count is unchanged. Driven by the resizeEvent."""
+        if getattr(self, "_view_mode", "grid") != "grid":
+            return
+        if not hasattr(self, "search_box"):
+            return
+        if self._grid_cols() != getattr(self, "_current_grid_cols", None):
+            self._filter_apps(self.search_box.text())
 
     def _populate_list(self, apps: list[AppInfo]) -> None:
         """List view - horizontal tiles."""
@@ -744,6 +835,7 @@ class LibraryPageMixin:
 
     def _filter_apps(self, text: str) -> None:
         q = text.lower()
+        self._refresh_commands(q)
         base = self._visible_apps()
         filtered = [a for a in base if q in a.full_name.lower() or q in a.name.lower()]
         if self._active_category:

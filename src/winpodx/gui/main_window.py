@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
     QMainWindow,
     QStackedWidget,
     QVBoxLayout,
@@ -20,6 +21,7 @@ from winpodx.core.app import list_available_apps
 from winpodx.core.config import Config
 from winpodx.gui._main_window_apps import AppCrudMixin
 from winpodx.gui._main_window_bringup import BringUpMixin
+from winpodx.gui._main_window_dashboard import DashboardMixin
 from winpodx.gui._main_window_devices import DevicesMixin
 from winpodx.gui._main_window_header import HeaderMixin
 from winpodx.gui._main_window_info import InfoPageMixin
@@ -42,6 +44,7 @@ log = logging.getLogger(__name__)
 class WinpodxWindow(
     AppCrudMixin,
     BringUpMixin,
+    DashboardMixin,
     DevicesMixin,
     HeaderMixin,
     InfoPageMixin,
@@ -62,6 +65,9 @@ class WinpodxWindow(
     app_launched = Signal(str)
     app_launch_failed = Signal(str)
     log_signal = Signal(str, str)
+    # Dashboard resource snapshot, emitted from the off-thread probe and
+    # painted onto the gauges on the GUI thread (see DashboardMixin).
+    dashboard_updated = Signal(object)
     # v0.5.1 bring-up signals (see _main_window_bringup.py).
     # ``bringup_phase`` is (phase_label, sub_detail); the dialog renders
     # both rows. ``bringup_done`` is (success, error_msg). ``bringup_started``
@@ -74,8 +80,13 @@ class WinpodxWindow(
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("WinPodX")
-        self.setMinimumSize(1000, 640)
-        self.resize(1100, 720)
+        # Lower minimum so the window can fit small / fractionally-scaled
+        # laptop screens once the 200px sidebar is accounted for.
+        self.setMinimumSize(920, 560)
+        # Preferred opening size, clamped to the screen by _fit_to_screen()
+        # after the UI is built (a fixed 1100px window ran off the right edge
+        # on smaller displays, clipping the Save button + Hardware column).
+        self._preferred_size = (1100, 720)
 
         self.cfg = Config.load()
         self.apps = list_available_apps()
@@ -91,6 +102,7 @@ class WinpodxWindow(
 
         self._setup_signals()
         self._build_ui()
+        self._fit_to_screen()
         self._start_status_timer()
 
         # v0.5.1: always-on tails feeding the bottom log bar + Terminal.
@@ -113,6 +125,7 @@ class WinpodxWindow(
         self.app_launched.connect(self._on_app_launched)
         self.app_launch_failed.connect(self._on_app_launch_failed)
         self.log_signal.connect(self._log_append)
+        self.dashboard_updated.connect(self._apply_snapshot)
         # Fan-out: the same log_signal also feeds the always-visible
         # 2-line bottom log bar (the QLabel pair built by
         # HeaderMixin._build_log_bar). This way every line that flows
@@ -139,16 +152,39 @@ class WinpodxWindow(
         central.setObjectName("centralRoot")
         central.setStyleSheet(f"QWidget#centralRoot {{ background: {C.MANTLE}; }}\n" + GLOBAL_STYLE)
         self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+        # Horizontal shell: left nav sidebar | content column (slim top strip
+        # + stacked pages). Mirrors the Start-menu-style mockup.
+        root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        root.addWidget(self._build_sidebar())
 
-        root.addWidget(self._build_top_bar())
+        content = QWidget()
+        content_col = QVBoxLayout(content)
+        content_col.setContentsMargins(0, 0, 0, 0)
+        content_col.setSpacing(0)
+        content_col.addWidget(self._build_top_strip())
 
+        # Clean launcher chrome: the old full-width status banner and the
+        # bottom info/log bars are NOT mounted -- the top-strip pod chip carries
+        # pod state + start/stop, and logs live on the Terminal page. The
+        # widgets are still built (kept referenced) so their updater methods
+        # (_apply_status_banner / _update_log_bar / pod-status info labels)
+        # stay valid no-ops on hidden, unmounted widgets. They are parented to
+        # ``central`` and hidden so they never float as top-level windows or
+        # flash a (0,0) ghost (same orphan-widget class as the License ghost).
         self.status_banner = self._build_status_banner()
-        root.addWidget(self.status_banner)
+        self._hidden_info_bar = self._build_info_bar()
+        self._hidden_log_bar = self._build_log_bar()
+        for _unmounted in (self.status_banner, self._hidden_info_bar, self._hidden_log_bar):
+            _unmounted.setParent(central)
+            _unmounted.hide()
 
+        # Page order == nav order (the _switch_page nav-index == page-index
+        # invariant). Dashboard is the home (index 0); the app launcher moves
+        # to "All apps" (index 1). License stays last.
         self.pages = QStackedWidget()
+        self.pages.addWidget(self._build_dashboard_page())
         self.pages.addWidget(self._build_library_page())
         self.pages.addWidget(self._build_settings_page())
         self.pages.addWidget(self._build_maintenance_page())
@@ -156,18 +192,55 @@ class WinpodxWindow(
         self.pages.addWidget(self._build_info_page())
         self.pages.addWidget(self._build_devices_page())
         self.pages.addWidget(self._build_license_page())
-        root.addWidget(self.pages)
+        content_col.addWidget(self.pages, 1)
 
-        root.addWidget(self._build_info_bar())
-        # Always-visible log ticker below info_bar. Shows the latest
-        # two ``log_signal`` lines (winpodx logger + pod tail when
-        # ``cfg.logging.level == "RAW"``) regardless of which page
-        # the user is on.
-        root.addWidget(self._build_log_bar())
+        root.addWidget(content, 1)
+
+    def _fit_to_screen(self) -> None:
+        """Open at the preferred size, but never larger than the screen.
+
+        Clamps the window to the available screen area and centers it so the
+        right-hand content (Save button, Hardware column) can't fall off the
+        edge on smaller or fractionally-scaled displays.
+        """
+        pref_w, pref_h = getattr(self, "_preferred_size", (1100, 720))
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            if avail.width() > 0 and avail.height() > 0:
+                w = max(self.minimumWidth(), min(pref_w, avail.width() - 60))
+                h = max(self.minimumHeight(), min(pref_h, avail.height() - 80))
+                self.resize(w, h)
+                self.move(
+                    avail.x() + (avail.width() - w) // 2,
+                    avail.y() + (avail.height() - h) // 2,
+                )
+                return
+        self.resize(pref_w, pref_h)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt signature
+        super().resizeEvent(event)
+        # Keep responsive page layouts (the Settings + Devices two-column
+        # forms) in step with the live window width as the user drags it.
+        if hasattr(self, "_reflow_settings"):
+            self._reflow_settings()
+        if hasattr(self, "_reflow_devices"):
+            self._reflow_devices()
+        if hasattr(self, "_reflow_dashboard"):
+            self._reflow_dashboard()
+        if hasattr(self, "_reflow_library"):
+            self._reflow_library()
 
 
 def run_gui() -> None:
     """Launch the winpodx GUI application."""
+    # Fractional display scaling (common on KDE / GNOME Wayland at 125% / 150%)
+    # must pass through untouched -- rounding it to an integer factor makes
+    # fixed-size widgets and the custom-painted gauges mismatch the rest of the
+    # UI ("text breaks, scale breaks"). Must be set before the QApplication.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     app = QApplication(sys.argv)
     app.setApplicationName("winpodx")
     app.setStyle("Fusion")
