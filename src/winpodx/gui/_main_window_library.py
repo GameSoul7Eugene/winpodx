@@ -61,6 +61,7 @@ from winpodx.gui.theme import (
     BTN_GHOST,
     BTN_PRIMARY,
     BTN_SECONDARY,
+    CHECKBOX,
     FILTER_CHIP,
     SCROLL_AREA,
     SEARCH_BAR,
@@ -219,6 +220,16 @@ class LibraryPageMixin:
         )
         self.btn_show_hidden.clicked.connect(self._on_toggle_hidden)
         right_group.addWidget(self.btn_show_hidden)
+
+        # Restore-deleted entry point (#530). Deleting an app tombstones its
+        # slug so discovery won't re-add it; this opens the un-delete list.
+        # Hidden when there's nothing to restore.
+        self.btn_deleted = QPushButton(tr("Deleted"))
+        self.btn_deleted.setStyleSheet(BTN_GHOST)
+        self.btn_deleted.setToolTip(tr("Restore apps you previously deleted"))
+        self.btn_deleted.clicked.connect(self._on_open_deleted_apps)
+        self.btn_deleted.setVisible(False)
+        right_group.addWidget(self.btn_deleted)
 
         # Multi-select bulk-remove (#530). Toggling drops to list view (the only
         # tile with room for a checkbox -- the grid card is a minimal external
@@ -786,7 +797,10 @@ class LibraryPageMixin:
         if getattr(self, "_select_mode", False):
             cb = QCheckBox()
             cb.setChecked(app.name in self._selected_names)
-            cb.setStyleSheet("margin-left: 12px;")
+            # Use the themed indicator (bordered box, blue when checked); the
+            # old bare "margin-left" stylesheet wiped the indicator style so the
+            # box was invisible against the dark tile (#530 follow-up).
+            cb.setStyleSheet(CHECKBOX + "QCheckBox { margin-left: 12px; }")
             cb.toggled.connect(lambda checked, n=app.name: self._on_tile_checked(n, checked))
             layout.addWidget(cb)
             layout.addSpacing(SPACE_S)
@@ -845,6 +859,20 @@ class LibraryPageMixin:
         layout.addWidget(edit_btn)
         layout.addSpacing(6)
 
+        # Surface "Reset" as a visible button (not just the right-click menu)
+        # when this app is an edited override with a detected twin to fall back
+        # to — the context-menu-only action was too hard to find (#530).
+        if getattr(app, "source", "user") == "user":
+            from winpodx.core.app import discovered_profile_exists
+
+            if discovered_profile_exists(app.name):
+                reset_btn = QPushButton(tr("Reset"))
+                reset_btn.setStyleSheet(BTN_SECONDARY)
+                reset_btn.setToolTip(tr("Restore the auto-detected profile + icon"))
+                reset_btn.clicked.connect(lambda: self._on_reset_app(app))
+                layout.addWidget(reset_btn)
+                layout.addSpacing(6)
+
         hide_btn = QPushButton(tr("Show") if app.hidden else tr("Hide"))
         hide_btn.setStyleSheet(BTN_SECONDARY)
         hide_btn.clicked.connect(lambda: self._on_toggle_app_hidden(app))
@@ -891,6 +919,49 @@ class LibraryPageMixin:
         self._show_hidden = self.btn_show_hidden.isChecked()
         self._refresh_hidden_button()
         self._filter_apps(self.search_box.text())
+
+    # -- restore deleted apps (#530) --------------------------------------
+
+    def _refresh_deleted_button(self) -> None:
+        """Show the "Deleted (N)" button only when there are tombstones."""
+        if not hasattr(self, "btn_deleted"):
+            return
+        from winpodx.core.app import suppressed_app_slugs
+
+        n = len(suppressed_app_slugs())
+        self.btn_deleted.setVisible(n > 0)
+        self.btn_deleted.setText(tr("Deleted ({n})").format(n=n) if n else tr("Deleted"))
+
+    def _on_open_deleted_apps(self) -> None:
+        from winpodx.core.app import suppressed_app_slugs
+        from winpodx.gui.deleted_apps_dialog import DeletedAppsDialog
+
+        slugs = sorted(suppressed_app_slugs())
+        if not slugs:
+            self._refresh_deleted_button()
+            return
+        dlg = DeletedAppsDialog(self, slugs=slugs, on_restore=self._restore_deleted_slugs)
+        dlg.exec()
+        self._refresh_deleted_button()
+
+    def _restore_deleted_slugs(self, slugs: list[str]) -> None:
+        """Un-tombstone the given slugs and re-scan so they reappear (#530)."""
+        from winpodx.core.app import (
+            clear_suppressed_slugs,
+            suppressed_app_slugs,
+            unsuppress_app_slug,
+        )
+
+        # Restore-all wipes the whole tombstone file; a partial set unsuppresses each.
+        if set(slugs) >= suppressed_app_slugs():
+            clear_suppressed_slugs()
+        else:
+            for s in slugs:
+                unsuppress_app_slug(s)
+        self.info_label.setText(tr("Restoring {n} app(s) — re-scanning…").format(n=len(slugs)))
+        # The discovered/<slug> dirs were removed on delete, so only a fresh
+        # discovery sweep actually brings the apps back.
+        self._on_refresh_apps()
 
     # -- multi-select bulk remove (#530) ----------------------------------
 
