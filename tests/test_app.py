@@ -305,6 +305,215 @@ def test_preserve_app_icon_skips_when_discovered_twin(monkeypatch, tmp_path):
     assert not (data_dir() / "apps" / "word" / "icon.svg").exists()
 
 
+# -- reset-to-detected + custom icon (#530) -------------------------------
+
+
+def _patch_desktop_sync(monkeypatch):
+    """Stub the best-effort desktop-entry sync and return the call log."""
+    import winpodx.desktop.entry as entry_mod
+    import winpodx.desktop.icons as icons_mod
+
+    calls: list = []
+    monkeypatch.setattr(entry_mod, "remove_desktop_entry", lambda n: calls.append(("rm", n)))
+    monkeypatch.setattr(entry_mod, "install_desktop_entry", lambda a: calls.append(("add", a.name)))
+    monkeypatch.setattr(icons_mod, "update_icon_cache", lambda: None)
+    return calls
+
+
+def test_reset_app_profile_restores_discovered(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import data_dir, reset_app_profile
+
+    calls = _patch_desktop_sync(monkeypatch)
+
+    disc = data_dir() / "discovered" / "word"
+    disc.mkdir(parents=True)
+    (disc / "app.toml").write_text(
+        'name = "word"\nfull_name = "Word"\nexecutable = "C:\\\\w.exe"\n', encoding="utf-8"
+    )
+    (disc / "icon.svg").write_text("<svg/>", encoding="utf-8")
+
+    user = data_dir() / "apps" / "word"
+    user.mkdir(parents=True)
+    (user / "app.toml").write_text(
+        'name = "word"\nfull_name = "Word (edited)"\nexecutable = "C:\\\\w.exe"\n', encoding="utf-8"
+    )
+
+    app = reset_app_profile("word")
+    assert app is not None
+    assert app.full_name == "Word"  # discovered metadata restored
+    assert app.source == "discovered"
+    assert app.icon_path == str(disc / "icon.svg")  # discovered icon returns
+    assert not user.exists()  # the override is gone
+    assert disc.exists()  # discovered profile untouched
+    assert ("add", "word") in calls  # menu re-synced
+
+
+def test_reset_app_profile_none_without_discovered_twin(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import data_dir, reset_app_profile
+
+    _patch_desktop_sync(monkeypatch)
+    user = data_dir() / "apps" / "solo"
+    user.mkdir(parents=True)
+    (user / "app.toml").write_text('name = "solo"\n', encoding="utf-8")
+
+    assert reset_app_profile("solo") is None  # nothing to fall back to
+    assert user.exists()  # left untouched (caller should Delete instead)
+
+
+def test_reset_app_profile_none_without_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import data_dir, reset_app_profile
+
+    _patch_desktop_sync(monkeypatch)
+    disc = data_dir() / "discovered" / "word"
+    disc.mkdir(parents=True)
+    (disc / "app.toml").write_text('name = "word"\n', encoding="utf-8")
+
+    assert reset_app_profile("word") is None  # no user override to discard
+
+
+def test_reset_app_profile_rejects_bad_name(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import reset_app_profile
+
+    _patch_desktop_sync(monkeypatch)
+    assert reset_app_profile("../etc") is None
+    assert reset_app_profile("a/b") is None
+
+
+def test_discovered_profile_exists(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import data_dir, discovered_profile_exists
+
+    assert discovered_profile_exists("word") is False
+    disc = data_dir() / "discovered" / "word"
+    disc.mkdir(parents=True)
+    (disc / "app.toml").write_text('name = "word"\n', encoding="utf-8")
+    assert discovered_profile_exists("word") is True
+    assert discovered_profile_exists("../etc") is False
+
+
+def test_set_custom_icon_copies_and_drops_other_ext(monkeypatch, tmp_path):
+    import pytest
+
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import data_dir
+    from winpodx.gui.app_dialog import set_custom_icon
+
+    user = data_dir() / "apps" / "word"
+    user.mkdir(parents=True)
+    (user / "icon.svg").write_text("<svg/>", encoding="utf-8")  # an old icon to be replaced
+
+    src = tmp_path / "pick.png"
+    src.write_text("png", encoding="utf-8")
+
+    assert set_custom_icon(str(src), "word") is True
+    assert (user / "icon.png").exists()  # new icon copied in
+    assert not (user / "icon.svg").exists()  # stale svg removed (svg shadows png)
+
+
+def test_set_custom_icon_rejects_bad_input(monkeypatch, tmp_path):
+    import pytest
+
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.gui.app_dialog import set_custom_icon
+
+    good = tmp_path / "i.png"
+    good.write_text("png", encoding="utf-8")
+    assert set_custom_icon(str(good), "../etc") is False  # path traversal
+    assert set_custom_icon(str(tmp_path / "missing.png"), "word") is False  # src absent
+    bad_ext = tmp_path / "i.gif"
+    bad_ext.write_text("gif", encoding="utf-8")
+    assert set_custom_icon(str(bad_ext), "word") is False  # unsupported extension
+
+
+# -- multi-select bulk remove (#530) --------------------------------------
+
+
+def test_batch_remove_deletes_and_tombstones(monkeypatch, tmp_path):
+    """The bulk-remove loop deletes each profile and tombstones discovered ones
+    so a sweep can't resurrect them -- driven through the real mixin method on a
+    minimal fake host (no full window needed)."""
+    import pytest
+
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from PySide6.QtWidgets import QMessageBox
+
+    from winpodx.core.app import data_dir, suppressed_app_slugs
+    from winpodx.gui._main_window_library import LibraryPageMixin
+
+    # excel: discovered-only. word: user override over a discovered twin.
+    for root, name in [("discovered", "excel"), ("discovered", "word"), ("apps", "word")]:
+        d = data_dir() / root / name
+        d.mkdir(parents=True)
+        (d / "app.toml").write_text(
+            f'name = "{name}"\nfull_name = "{name}"\nexecutable = "C:\\\\x.exe"\n', encoding="utf-8"
+        )
+
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
+    )
+    import winpodx.desktop.entry as entry_mod
+
+    monkeypatch.setattr(entry_mod, "remove_desktop_entry", lambda n: None)
+
+    host = type("H", (), {})()
+    host._selected_names = {"excel", "word"}
+    host._select_mode = True
+    host.btn_select = type("B", (), {"setChecked": lambda self, v: None})()
+    host.info_label = type("L", (), {"setText": lambda self, t: None})()
+    host._reload_apps = lambda: None
+    host._update_batch_bar = lambda: None
+
+    LibraryPageMixin._on_batch_remove(host)
+
+    assert not (data_dir() / "discovered" / "excel").exists()
+    assert not (data_dir() / "apps" / "word").exists()
+    assert host._selected_names == set()
+    assert host._select_mode is False
+    # Parity with single-delete (#514): only an app whose listed source is
+    # "discovered" gets tombstoned. "word" resolves to the user override
+    # (source="user"), so it is NOT tombstoned -- same as _on_delete_app.
+    tomb = suppressed_app_slugs()
+    assert "excel" in tomb
+    assert "word" not in tomb
+
+
+def test_batch_remove_aborts_on_no(monkeypatch, tmp_path):
+    import pytest
+
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from PySide6.QtWidgets import QMessageBox
+
+    from winpodx.core.app import data_dir
+    from winpodx.gui._main_window_library import LibraryPageMixin
+
+    d = data_dir() / "apps" / "keep"
+    d.mkdir(parents=True)
+    (d / "app.toml").write_text('name = "keep"\n', encoding="utf-8")
+
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+    )
+    host = type("H", (), {})()
+    host._selected_names = {"keep"}
+    host._select_mode = True
+    host.btn_select = type("B", (), {"setChecked": lambda self, v: None})()
+    host.info_label = type("L", (), {"setText": lambda self, t: None})()
+    host._reload_apps = lambda: None
+    host._update_batch_bar = lambda: None
+
+    LibraryPageMixin._on_batch_remove(host)
+    assert d.exists()  # declined -> nothing removed
+    assert host._selected_names == {"keep"}  # selection preserved
+
+
 # -- checksum-gated re-extraction (periodic icon refresh) ------------------
 
 _H1 = "a" * 64
