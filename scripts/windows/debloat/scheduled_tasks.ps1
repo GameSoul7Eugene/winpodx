@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
-# winpodx debloat: disable noisy/unused scheduled tasks.
+# winpodx debloat: disable noisy/unnecessary scheduled tasks.
 #
 # Scope is deliberately limited to pure telemetry / CEIP / feedback / ad tasks.
 # We do NOT touch security (Defender), licensing/activation, certificate
 # services, Windows Update repair (WaaSMedic/UpdateOrchestrator), language
-# packs, Windows Hello, or general health/maintenance tasks -- disabling those
+# packs, Windows Hello, or general health/maintenance tasks – disabling those
 # risks breaking activation, updates, or the IME. PR #590 proposed a ~170-task
 # blanket list; only the telemetry-safe subset below was adopted.
 #
@@ -25,26 +25,32 @@
 # the loop continues.
 
 $tasks = @(
-    "\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser",
-    "\Microsoft\Windows\Application Experience\ProgramDataUpdater",
-    "\Microsoft\Windows\Application Experience\ProgramInventoryUpdater",
-    "\Microsoft\Windows\Application Experience\AitAgent",
-    "\Microsoft\Windows\Autochk\Proxy",
-    "\Microsoft\Windows\Customer Experience Improvement Program\Consolidator",
-    "\Microsoft\Windows\Customer Experience Improvement Program\KernelCeipTask",
-    "\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip",
-    "\Microsoft\Windows\Customer Experience Improvement Program\BthSQM",
-    "\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector",
-    "\Microsoft\Windows\Feedback\Siuf\DmClient",
-    "\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload",
-    "\Microsoft\Windows\WindowsAI\Copilot\CopilotDataCollectionTask",
-    "\Microsoft\Windows\WindowsAI\Insights\InsightsDataCollectionTask",
-    "\Microsoft\Office\OfficeTelemetryAgentLogOn2016",
-    "\Microsoft\Office\OfficeTelemetryAgentFallBack2016",
-    "\Microsoft\Windows\Maps\MapsToastTask",
-    "\Microsoft\Windows\Maps\MapsUpdateTask",
-    "\Microsoft\Windows\RetailDemo\CleanupOfflineContent",
-    "\Microsoft\Windows\Windows Error Reporting\QueueReporting"
+	"\Microsoft\Office\OfficeTelemetryAgentFallBack2016",
+	"\Microsoft\Office\OfficeTelemetryAgentLogOn2016",
+	"\Microsoft\Windows\Application Experience\AitAgent",
+	"\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser",
+	"\Microsoft\Windows\Application Experience\PcaPatchDbTask",
+	"\Microsoft\Windows\Application Experience\ProgramDataUpdater",
+	"\Microsoft\Windows\Application Experience\ProgramInventoryUpdater",
+	"\Microsoft\Windows\Application Experience\StartupAppTask",
+	"\Microsoft\Windows\Autochk\Proxy",
+	"\Microsoft\Windows\Customer Experience Improvement Program\BthSQM",
+	"\Microsoft\Windows\Customer Experience Improvement Program\Consolidator",
+	"\Microsoft\Windows\Customer Experience Improvement Program\KernelCeipTask",
+	"\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip",
+	"\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector",
+	"\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticResolver",
+	"\Microsoft\Windows\Feedback\Siuf\DmClient",
+	"\Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload",
+	"\Microsoft\Windows\Maintenance\WinSAT",
+	"\Microsoft\Windows\Maps\MapsToastTask",
+	"\Microsoft\Windows\Maps\MapsUpdateTask",
+	"\Microsoft\Windows\NetTrace\GatherNetworkInfo",
+	"\Microsoft\Windows\PI\Sqm-Tasks",
+	"\Microsoft\Windows\RetailDemo\CleanupOfflineContent",
+	"\Microsoft\Windows\Windows Error Reporting\QueueReporting",
+	"\Microsoft\Windows\WindowsAI\Copilot\CopilotDataCollectionTask",
+	"\Microsoft\Windows\WindowsAI\Insights\InsightsDataCollectionTask"
 )
 
 foreach ($task in $tasks) {
