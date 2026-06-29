@@ -1,20 +1,31 @@
 # SPDX-License-Identifier: MIT
 # discover_apps.ps1 -- enumerate installed Windows apps and emit JSON on stdout
 #
-# Consumed by winpodx.core.discovery. Four sources are scanned inside the
-# running guest and unioned, deduping by lowercase executable path or UWP
+# Consumed by winpodx.core.discovery. Up to five sources are scanned inside
+# the running guest and unioned, deduping by lowercase executable path or UWP
 # AUMID:
 #
-#   1. Registry App Paths (HKLM + HKCU)
+#   1. Registry App Paths (HKLM + HKCU)        [full-scan only]
 #   2. Start Menu .lnk recursion (ProgramData + every user profile)
 #   3. UWP / MSIX packages via Get-AppxPackage + AppxManifest.xml
-#   4. Chocolatey + Scoop shims
+#      (default: only those whose AUMID is in the Start Menu / Get-StartApps)
+#   4. Chocolatey + Scoop shims                [full-scan only]
+#   5. Essentials (File Explorer / Calculator / Settings) -- always emitted
+#
+# DEFAULT (Start-Menu-only, #581): only what the Windows Start Menu actually
+# shows reaches the Linux menu -- Source 2 (.lnk), Start-Menu-visible UWP, and
+# the essentials. App Paths + choco/scoop shims (the sources that flooded the
+# menu with uninstallers / helpers / background exes) are SKIPPED. Set
+# ``desktop.full_app_scan = true`` (host prepends the opt-in, see below) or
+# pass ``-FullScan`` (file/CLI use) to restore the legacy 5-source union.
 #
 # Output schema per entry (JSON array on stdout):
 #
 #   { "name": str, "path": str, "args": str,
 #     "source": "win32" | "uwp", "wm_class_hint": str,
-#     "launch_uri": str, "icon_b64": str }
+#     "launch_uri": str, "icon_b64": str,
+#     "start_menu_folder": str }   # #581 Goal 2: relative Start Menu subfolder
+#                                  # ("" for top-level / non-.lnk sources)
 #
 # Semantic contract for `launch_uri`:
 #   - source == "uwp"   : bare AUMID of the form `PackageFamilyName!AppId`
@@ -35,8 +46,18 @@
 
 [CmdletBinding()]
 param(
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$FullScan
 )
+
+# #581: scan mode. DEFAULT is Start-Menu-only (App Paths + choco/scoop shims
+# skipped; UWP intersected with the Start Menu set). For
+# ``desktop.full_app_scan = true`` the host flips the assignment below to true
+# BEFORE exec (it can't prepend -- ``param`` must stay the first statement; it
+# does a one-shot literal swap of the line `<var> = $false`). The ``-FullScan``
+# switch forces it for direct file / CLI runs.
+$WinpodxFullScan = $false
+if ($FullScan.IsPresent) { $WinpodxFullScan = $true }
 
 $ErrorActionPreference = 'Continue'
 
@@ -164,14 +185,15 @@ function Get-ExeHash {
 if ($DryRun) {
     $canned = @(
         [ordered]@{
-            name          = 'Notepad (DryRun)'
-            description   = 'Plain text editor (DryRun fixture)'
-            path          = 'C:\Windows\notepad.exe'
-            args          = ''
-            source        = 'win32'
-            wm_class_hint = 'notepad'
-            launch_uri    = ''
-            icon_b64      = ''
+            name              = 'Notepad (DryRun)'
+            description       = 'Plain text editor (DryRun fixture)'
+            path              = 'C:\Windows\notepad.exe'
+            args              = ''
+            source            = 'win32'
+            wm_class_hint     = 'notepad'
+            launch_uri        = ''
+            icon_b64          = ''
+            start_menu_folder = 'Accessories'
         }
     )
     # @(...) wrapper forces array even for single element on PS 5.1.
@@ -396,14 +418,16 @@ function Add-Result {
     if ($seen.ContainsKey($key)) { return }
     $seen[$key] = $true
     $results.Add([ordered]@{
-        name          = $name
-        description   = [string]$Entry.description
-        path          = $path
-        args          = [string]$Entry.args
-        source        = [string]$Entry.source
-        wm_class_hint = [string]$Entry.wm_class_hint
-        launch_uri    = [string]$Entry.launch_uri
-        icon_b64      = [string]$Entry.icon_b64
+        name              = $name
+        description       = [string]$Entry.description
+        path              = $path
+        args              = [string]$Entry.args
+        source            = [string]$Entry.source
+        wm_class_hint     = [string]$Entry.wm_class_hint
+        launch_uri        = [string]$Entry.launch_uri
+        icon_b64          = [string]$Entry.icon_b64
+        # #581 Goal 2: Start Menu subfolder (relative), '' for non-.lnk sources.
+        start_menu_folder = [string]$Entry.start_menu_folder
         exe_hash      = Get-ExeHash $path
         # Union of every place Windows records what this app can open: the
         # caller's declared associations (UWP AppxManifest fileTypeAssociation)
@@ -432,8 +456,11 @@ if (-not (Get-Command 'Write-WinpodxProgress' -ErrorAction SilentlyContinue)) {
     function Write-WinpodxProgress($msg) { }
 }
 
-# --- Source 1: Registry App Paths ------------------------------------------
+# --- Source 1: Registry App Paths --------------------------- [full-scan only]
+# Skipped by default (#581): App Paths lists every registered exe (helpers,
+# CLI tools, background processes) -- not what the Start Menu shows.
 
+if ($WinpodxFullScan) {
 Write-WinpodxProgress 'Scanning Registry App Paths...'
 foreach ($hive in 'HKLM:', 'HKCU:') {
     $root = Join-Path $hive 'Software\Microsoft\Windows\CurrentVersion\App Paths'
@@ -462,6 +489,7 @@ foreach ($hive in 'HKLM:', 'HKCU:') {
         }
     } catch { }
 }
+}  # end if ($WinpodxFullScan) -- Source 1
 
 # --- Source 2: Start Menu .lnk files ---------------------------------------
 
@@ -506,15 +534,30 @@ foreach ($d in $startDirs) {
                     $lnkDesc = ''
                     try { $lnkDesc = [string]$lnk.Description } catch { $lnkDesc = '' }
                     if (-not $lnkDesc) { $lnkDesc = Get-AppDescription $target }
+                    # #581 Goal 2: the Start Menu subfolder this .lnk lives in,
+                    # relative to its Programs root ($d). e.g. a shortcut at
+                    # ...\Programs\Microsoft Office\Tools\Foo.lnk -> "Microsoft
+                    # Office\Tools"; a top-level shortcut -> "". The host mirrors
+                    # this into a nested winpodx submenu. Only the relative
+                    # subpath is emitted -- never the absolute / user path.
+                    $smFolder = ''
+                    try {
+                        $lnkDir = [System.IO.Path]::GetDirectoryName($_.FullName)
+                        if ($lnkDir -and $lnkDir.Length -gt $d.Length -and
+                            $lnkDir.ToLower().StartsWith($d.ToLower())) {
+                            $smFolder = $lnkDir.Substring($d.Length).Trim('\').Trim('/')
+                        }
+                    } catch { $smFolder = '' }
                     Add-Result @{
-                        name          = Get-DisplayName -ExePath $target -Fallback $baseName
-                        description   = $lnkDesc
-                        path          = $target
-                        args          = [string]$lnk.Arguments
-                        source        = 'win32'
-                        wm_class_hint = Get-WmClassHint $target
-                        launch_uri    = ''
-                        icon_b64      = ConvertTo-IconBase64 $target
+                        name              = Get-DisplayName -ExePath $target -Fallback $baseName
+                        description       = $lnkDesc
+                        path              = $target
+                        args              = [string]$lnk.Arguments
+                        source            = 'win32'
+                        wm_class_hint     = Get-WmClassHint $target
+                        launch_uri        = ''
+                        icon_b64          = ConvertTo-IconBase64 $target
+                        start_menu_folder = $smFolder
                     }
                 } catch { }
             }
@@ -562,6 +605,16 @@ try {
                     # `shell:AppsFolder\` itself; duplicating the prefix
                     # here would produce `shell:AppsFolder\shell:AppsFolder\...`.
                     $aumid = "$($pkg.PackageFamilyName)!$appId"
+
+                    # #581: in the default Start-Menu-only mode, keep only UWP
+                    # apps the Start Menu actually shows (AUMID in Get-StartApps).
+                    # Drops background/headless packages. Fall back to emitting
+                    # all when Get-StartApps came back empty (non-interactive
+                    # session) so we never hide every UWP app.
+                    if (-not $WinpodxFullScan -and $startAppNames.Count -gt 0 `
+                        -and -not $startAppNames.ContainsKey($aumid)) {
+                        continue
+                    }
 
                     $ve = $null
                     foreach ($probe in 'VisualElements', 'uap:VisualElements') {
@@ -671,8 +724,10 @@ try {
     }
 } catch { }
 
-# --- Source 4: Chocolatey + Scoop shims ------------------------------------
+# --- Source 4: Chocolatey + Scoop shims --------------------- [full-scan only]
+# Skipped by default (#581): shims are CLI tools, rarely Start Menu apps.
 
+if ($WinpodxFullScan) {
 Write-WinpodxProgress 'Scanning Chocolatey + Scoop shims...'
 $shimDirs = @()
 if ($env:ProgramData) {
@@ -709,6 +764,7 @@ foreach ($d in $shimDirs) {
         }
     } catch { }
 }
+}  # end if ($WinpodxFullScan) -- Source 4
 
 # --- Source 5: Essentials (always emit) ------------------------------------
 #

@@ -34,7 +34,9 @@ from winpodx.core.discovery import (
     _is_junk_entry,
     _parse_discovery_output,
     _purge_reverse_open_entries,
+    _render_app_toml,
     _safe_rmtree,
+    _sanitize_start_menu_folder,
     _slugify_name,
     _sniff_icon_ext,
     _validate_png_bytes,
@@ -828,6 +830,50 @@ def test_discover_happy_path_roundtrip(tmp_path, monkeypatch):
     assert "# stub" in captured["payload"]
 
 
+# --- #581: full_app_scan host-side script patch ----------------------------
+
+_FULLSCAN_SENTINEL_SCRIPT = "param([switch]$FullScan)\n$WinpodxFullScan = $false\n# body"
+
+
+def test_full_app_scan_off_leaves_startmenu_default(tmp_path, monkeypatch):
+    """Default (full_app_scan False): the script body reaches the guest with
+    its Start-Menu-only sentinel untouched."""
+    cfg = _make_cfg(backend="podman")
+    cfg.desktop.full_app_scan = False
+    script = tmp_path / "discover_apps.ps1"
+    script.write_text(_FULLSCAN_SENTINEL_SCRIPT)
+
+    captured = _stub_run_in_windows(monkeypatch, rc=0, stdout="[]")
+    with (
+        patch("winpodx.core.discovery.shutil.which", return_value="/usr/bin/podman"),
+        patch("winpodx.core.discovery._ps_script_path", return_value=script),
+    ):
+        discover_apps(cfg)
+
+    assert "$WinpodxFullScan = $false" in captured["payload"]
+    assert "$WinpodxFullScan = $true" not in captured["payload"]
+
+
+def test_full_app_scan_on_patches_sentinel_to_true(tmp_path, monkeypatch):
+    """Opt-in (full_app_scan True): the host flips the sentinel so the guest
+    runs the legacy 5-source scan."""
+    cfg = _make_cfg(backend="podman")
+    cfg.desktop.full_app_scan = True
+    script = tmp_path / "discover_apps.ps1"
+    script.write_text(_FULLSCAN_SENTINEL_SCRIPT)
+
+    captured = _stub_run_in_windows(monkeypatch, rc=0, stdout="[]")
+    with (
+        patch("winpodx.core.discovery.shutil.which", return_value="/usr/bin/podman"),
+        patch("winpodx.core.discovery._ps_script_path", return_value=script),
+    ):
+        discover_apps(cfg)
+
+    assert "$WinpodxFullScan = $true" in captured["payload"]
+    # Only the assignment flips; the param switch default stays intact.
+    assert "$WinpodxFullScan = $false" not in captured["payload"]
+
+
 def test_discover_nonzero_exit_raises(tmp_path, monkeypatch):
     cfg = _make_cfg(backend="podman")
     script = tmp_path / "discover_apps.ps1"
@@ -1113,3 +1159,137 @@ def test_noise_pattern_yields_to_essential(tmp_path):
     persist_discovered([], target_dir=tmp_path, add_essentials=True)
     toml_text = (tmp_path / "file-explorer" / "app.toml").read_text()
     assert "hidden = true" not in toml_text
+
+
+# --- #581 Goal 2: start_menu_folder sanitize + thread-through -------------
+
+
+def test_sanitize_start_menu_folder_normal():
+    assert _sanitize_start_menu_folder("Microsoft Office\\Tools") == "Microsoft Office/Tools"
+
+
+def test_sanitize_start_menu_folder_empty_and_nonstr():
+    assert _sanitize_start_menu_folder("") == ""
+    assert _sanitize_start_menu_folder("   ") == ""
+    assert _sanitize_start_menu_folder(None) == ""
+    assert _sanitize_start_menu_folder(123) == ""
+
+
+def test_sanitize_start_menu_folder_drops_traversal_and_drive():
+    # ".." / "." components and drive-letter / ADS components are removed.
+    assert _sanitize_start_menu_folder("..\\..\\Evil") == "Evil"
+    assert _sanitize_start_menu_folder("C:\\Windows\\System32") == "Windows/System32"
+    assert _sanitize_start_menu_folder(".\\Foo\\.\\Bar") == "Foo/Bar"
+
+
+def test_sanitize_start_menu_folder_caps_depth():
+    assert _sanitize_start_menu_folder("a/b/c/d/e/f") == "a/b/c/d"
+
+
+def test_sanitize_start_menu_folder_strips_control_chars():
+    assert _sanitize_start_menu_folder("Of\nfice\t/To\rols") == "Office/Tools"
+
+
+def test_entry_to_discovered_carries_folder():
+    app = _entry_to_discovered(
+        _valid_entry(name="Word", start_menu_folder="Microsoft Office\\Tools")
+    )
+    assert app is not None
+    assert app.start_menu_folder == "Microsoft Office/Tools"
+
+
+def test_entry_to_discovered_default_folder_empty():
+    app = _entry_to_discovered(_valid_entry(name="Word"))
+    assert app is not None
+    assert app.start_menu_folder == ""
+
+
+def test_render_app_toml_emits_folder_when_set():
+    app = DiscoveredApp(
+        name="word",
+        full_name="Word",
+        executable="C:\\w.exe",
+        start_menu_folder="Microsoft Office/Tools",
+    )
+    toml_text = _render_app_toml(app)
+    assert 'start_menu_folder = "Microsoft Office/Tools"' in toml_text
+
+
+def test_render_app_toml_omits_folder_when_empty():
+    app = DiscoveredApp(name="word", full_name="Word", executable="C:\\w.exe")
+    assert "start_menu_folder" not in _render_app_toml(app)
+
+
+def test_folder_round_trips_through_persist_and_load(tmp_path):
+    from winpodx.core.app import load_app
+
+    persist_discovered(
+        [
+            DiscoveredApp(
+                name="word",
+                full_name="Word",
+                executable="C:\\w.exe",
+                start_menu_folder="Microsoft Office/Tools",
+            )
+        ],
+        target_dir=tmp_path,
+        add_essentials=False,
+    )
+    loaded = load_app(tmp_path / "word")
+    assert loaded is not None
+    assert loaded.start_menu_folder == "Microsoft Office/Tools"
+
+
+# --- #581: refresh migration — orphan prune + user-dir preservation -------
+
+
+def test_persist_prunes_orphaned_discovered_entries(tmp_path):
+    # The migration: a later, smaller scan removes discovered dirs no longer
+    # present (the legacy full->Start-Menu shrink case).
+    big = [
+        DiscoveredApp(name=n, full_name=n, executable=f"C:\\{n}.exe")
+        for n in ("alpha", "beta", "gamma")
+    ]
+    persist_discovered(big, target_dir=tmp_path, add_essentials=False)
+    assert {p.name for p in tmp_path.iterdir()} == {"alpha", "beta", "gamma"}
+
+    persist_discovered(
+        [DiscoveredApp(name="alpha", full_name="alpha", executable="C:\\alpha.exe")],
+        target_dir=tmp_path,
+        add_essentials=False,
+    )
+    assert {p.name for p in tmp_path.iterdir()} == {"alpha"}
+
+
+def test_persist_empty_scan_does_not_prune(tmp_path):
+    # A failed/empty discovery must NOT wipe the existing menu down to nothing.
+    persist_discovered(
+        [DiscoveredApp(name="keep", full_name="keep", executable="C:\\k.exe")],
+        target_dir=tmp_path,
+        add_essentials=False,
+    )
+    persist_discovered([], target_dir=tmp_path, add_essentials=False)
+    assert (tmp_path / "keep").exists()
+
+
+def test_persist_does_not_touch_user_apps_dir(tmp_path, monkeypatch):
+    # A manually-added app (user_apps_dir) survives a discovery refresh that does
+    # not include it -- the prune is scoped to the discovered dir only.
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    from winpodx.core.app import discovered_apps_dir, user_apps_dir
+
+    user_app = user_apps_dir() / "myportable"
+    user_app.mkdir(parents=True)
+    (user_app / "app.toml").write_text(
+        'name = "myportable"\nfull_name = "My Portable"\nexecutable = "C:\\\\p.exe"\n',
+        encoding="utf-8",
+    )
+
+    # Discover a totally different set into the (separate) discovered dir.
+    persist_discovered(
+        [DiscoveredApp(name="discovered1", full_name="D1", executable="C:\\d.exe")],
+        target_dir=discovered_apps_dir(),
+        add_essentials=False,
+    )
+    assert user_app.exists()
+    assert (user_app / "app.toml").exists()

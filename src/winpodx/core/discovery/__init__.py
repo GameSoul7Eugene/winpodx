@@ -287,6 +287,10 @@ class DiscoveredApp:
     # scan in discover_apps.ps1), e.g. [".docx", ".xlsx"]. Mapped to MIME types
     # for the .desktop MimeType= when desktop.mime_associations is on (#545).
     extensions: list[str] = field(default_factory=list)
+    # #581 Goal 2: the app's Start Menu subfolder, relative + sanitized, with
+    # "/" separators (e.g. "Microsoft Office/Tools"). "" = top-level. Mirrored
+    # into a nested winpodx submenu by the desktop-entry / menu generators.
+    start_menu_folder: str = ""
 
 
 # --- Hybrid filter: essentials allowlist + noise denylist -----------------
@@ -672,6 +676,20 @@ def discover_apps(
             f"Cannot read discovery script {script}: {e}", kind="script_missing"
         ) from e
 
+    # #581: opt into the legacy full 5-source scan. The script defaults to
+    # Start-Menu-only; flip its `$WinpodxFullScan = $false` line to `= $true`
+    # when the user enabled desktop.full_app_scan. We patch the body (not a
+    # prepend / CLI arg) because the script is exec'd as a -Command body where
+    # `param` must remain the first statement and switch args can't be passed.
+    if getattr(cfg.desktop, "full_app_scan", False):
+        patched = script_body.replace("$WinpodxFullScan = $false", "$WinpodxFullScan = $true", 1)
+        if patched == script_body:
+            log.warning(
+                "full_app_scan enabled but discovery script sentinel not found; "
+                "falling back to default Start-Menu-only scan"
+            )
+        script_body = patched
+
     # Wait for at least one transport to answer before invoking the
     # script. Covers the install.sh race where migrate's apply chain
     # just cycled TermService (multi-session activation) and the
@@ -983,6 +1001,37 @@ def _parse_discovery_output(stdout: str) -> list[DiscoveredApp]:
     return apps
 
 
+# #581 Goal 2: bounds for the Start Menu folder path mirrored into the menu.
+_MAX_FOLDER_DEPTH = 4
+_MAX_FOLDER_COMPONENT_LEN = 48
+
+
+def _sanitize_start_menu_folder(raw: object) -> str:
+    """Normalise a guest-reported Start Menu subfolder into a safe relative path.
+
+    The value becomes both an XDG menu node and a ``.directory`` filename slug,
+    so a hostile/odd guest must not be able to smuggle path traversal, absolute
+    paths, control characters, or unbounded depth. Returns a ``/``-joined path
+    of cleaned components (display text preserved — spaces/case kept), or ``""``
+    for top-level / unusable input.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    components: list[str] = []
+    for part in raw.replace("\\", "/").split("/"):
+        # Strip control chars (incl. newlines — .directory is line-terminated)
+        # and surrounding whitespace/dots.
+        cleaned = "".join(ch for ch in part if ch.isprintable()).strip().strip(".")
+        if not cleaned or cleaned in (".", ".."):
+            continue
+        if ":" in cleaned:  # drive letters / NTFS ADS — never a real subfolder
+            continue
+        components.append(cleaned[:_MAX_FOLDER_COMPONENT_LEN])
+        if len(components) >= _MAX_FOLDER_DEPTH:
+            break
+    return "/".join(components)
+
+
 def _entry_to_discovered(entry: dict[str, Any]) -> DiscoveredApp | None:
     """Validate and convert one JSON entry into a ``DiscoveredApp``."""
     raw_name = entry.get("name")
@@ -1065,6 +1114,8 @@ def _entry_to_discovered(entry: dict[str, Any]) -> DiscoveredApp | None:
             if _SAFE_EXT_RE.match(ext) and ext not in extensions:
                 extensions.append(ext)
 
+    start_menu_folder = _sanitize_start_menu_folder(entry.get("start_menu_folder", ""))
+
     return DiscoveredApp(
         name=slug,
         full_name=raw_name.strip(),
@@ -1077,6 +1128,7 @@ def _entry_to_discovered(entry: dict[str, Any]) -> DiscoveredApp | None:
         exe_hash=exe_hash,
         icon_bytes=icon_bytes,
         extensions=extensions,
+        start_menu_folder=start_menu_folder,
     )
 
 
@@ -1137,6 +1189,12 @@ def persist_discovered(
     # entries under discovered/. Sweep them now so this run cleans up
     # after the bug — users don't need a manual `rm -rf` step.
     _purge_reverse_open_entries(root)
+
+    # #581: whether the SCAN itself returned anything (captured before
+    # essentials are merged in). Gates the orphan-prune below so a failed /
+    # empty discovery — which would otherwise leave only synthesized essentials
+    # — can never wipe the existing menu.
+    had_real_apps = bool(apps)
 
     # Hybrid filter step — guarantee essentials are present (synthesizing
     # stubs when the scan missed them) before we touch disk. Tests can
@@ -1233,6 +1291,32 @@ def persist_discovered(
 
         written.append(toml_path)
 
+    # #581: prune ORPHANED discovered entries — per-app dirs from a previous
+    # (larger) scan that this scan no longer produced. This is what makes a
+    # refresh MIGRATE the menu: when the Start-Menu-only default shrinks the set
+    # (or an app is uninstalled in the guest), the stale ``discovered/<slug>``
+    # dir is removed here, so list_available_apps() drops it and the downstream
+    # ``app refresh`` .desktop cleanup removes its launcher. Guards:
+    #   * only on ``replace`` (the full-replacement contract), and only when the
+    #     scan returned real apps (``had_real_apps``) — a failed/empty discovery
+    #     must never wipe the menu down to essentials.
+    #   * scoped to ``root`` (the discovered tree); user_apps_dir() is a separate
+    #     directory and is never enumerated here, so manually-added apps are
+    #     untouched.
+    # Suppressed slugs (#514) are already absent from ``seen`` and from disk, so
+    # they need no special handling.
+    if replace and had_real_apps:
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            children = []
+        for child in children:
+            if child.name in seen or not child.is_dir():
+                continue
+            if not _SAFE_NAME_RE.match(child.name):
+                continue
+            _safe_rmtree(child, root)
+
     return written
 
 
@@ -1303,6 +1387,8 @@ def _render_app_toml(app: DiscoveredApp, mime_enabled: bool = True) -> str:
         data["launch_uri"] = app.launch_uri
     if app.exe_hash:
         data["exe_hash"] = app.exe_hash
+    if app.start_menu_folder:
+        data["start_menu_folder"] = app.start_menu_folder
     # Always emit hidden / essential when set so AppInfo.load_app picks
     # them up. Keep the keys absent on the default-False side to keep
     # toml diffs minimal for the common case (visible, non-essential).

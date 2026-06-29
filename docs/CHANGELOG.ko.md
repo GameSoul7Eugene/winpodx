@@ -11,14 +11,17 @@
 
 ### Added
 
+- **Windows 앱이 Linux 메뉴에서 시작 메뉴 폴더별로 그룹화됩니다** (#581, @Milliw 기여 감사). 각 앱이 속한 시작 메뉴 하위 폴더(예: `Microsoft Office\Tools`)를 "winpodx" 메뉴 폴더 아래 중첩 하위 그룹으로 미러 — Windows에서 보이는 그대로. KDE Plasma·XFCE·Cinnamon·MATE·LXQt에서 렌더(freedesktop `.menu` 메커니즘); GNOME은 앱이 보이긴 하나 그룹화 안 됨(오버뷰가 평면 그리드). 최상위 앱·폴더 없는 앱은 "winpodx" 바로 아래에 위치.
 - **`[pod] keyboard` 설정이 이제 FreeRDP 세션 키보드 레이아웃에 반영됨** (#660). Windows 설치용으로 고른 로케일(예: `keyboard = "hu-HU"`)이 대응하는 Windows 레이아웃으로 매핑되어 FreeRDP에 `/kbd:layout:0x…`로 전달됩니다. 비-US 키보드가 `rdp.extra_flags`를 손으로 안 써도 RemoteApp 창에서 동작합니다. 기본값 `en-US`는 그대로 둬서(FreeRDP가 호스트 XKB 레이아웃 자동감지 유지 — 설정을 안 건드린 유저가 US로 강제되지 않음), `rdp.extra_flags`에 명시한 `/kbd`가 항상 우선하고, 매핑에 없는 로케일은 자동감지로 폴백합니다. (`rdp.extra_flags`로 `/kbd`를 직접 넘기는 건 0.7.4에서 이미 허용됨.)
 
 ### Changed
 
+- **앱 검출이 기본적으로 Windows 시작 메뉴에 실제로 뜨는 앱만 노출합니다** (#581, @Milliw 기여 감사). 기존에는 등록된 모든 실행 파일(레지스트리 App Paths, Chocolatey/Scoop shim, 모든 UWP 패키지)을 긁어 Linux 메뉴에 쏟아부어 언인스톨러·헬퍼·백그라운드 프로세스로 범람했습니다. 이제 기본값은 시작 메뉴 전용입니다: 시작 메뉴 바로가기 + 시작 메뉴에 보이는 UWP 앱(`Get-StartApps`와 교차) + OS 필수앱(파일 탐색기/계산기/설정). 옛 동작은 **`winpodx config set desktop.full_app_scan true`** 또는 설정 → "설치된 모든 앱 검출(시작 메뉴 외 포함)" 체크박스로 되돌립니다 — 시작 메뉴 항목이 없는 포터블 앱에 유용. 다음 `winpodx app refresh`부터 적용.
 - **번들 rdprrap 0.1.3 → 0.3.0.** rdprrap(각 RemoteApp 창에 독립 세션을 주는 멀티세션 RDP wrapper)이 `termsrv.dll` 패치 지점을 **동적으로** 도출합니다 — 하드코딩된 struct 오프셋/레지스터/바이트 템플릿 대신 런타임에 각 타겟 함수를 디스어셈블해 패치 바이트를 인코딩. Windows 빌드별 `termsrv.dll` 구조 변화에도 멀티세션이 유지됩니다. OEM 버전 27 → 28이라 기존 설치는 다음 `winpodx guest sync` / `apply-fixes` 때 반영.
 
 ### Fixed
 
+- **`winpodx app refresh`가 이제 더 이상 검출 안 되는 앱을 추가만 하지 않고 제거도 함** (#581). 기존 refresh는 항상 *추가만* 해서, 사라진 검출 앱(Windows에서 언인스톨된 앱, 또는 새 시작메뉴-전용 기본값으로 빠진 모든 앱)이 수동 삭제 전까지 Linux 메뉴에 남았습니다. 이제 사라진 discovered 프로필(과 런처)을 prune해서 메뉴가 실제로 현재 집합으로 마이그레이션됩니다. 수동 추가 앱(`~/.local/share/winpodx/apps/`)은 절대 안 건드리고, 실패/빈 스캔은 메뉴를 비우지 않습니다.
 - **`--win-iso`가 이제 다운로드 대신 실제로 그 ISO에서 설치함** (#647, @ismikes 기여 감사). 로컬 ISO가 `winpodx setup`이 이미 `compose up`을 돌린 *뒤*에 `<storage>/custom.iso`로 스테이징돼서, 컨테이너가 이미 부팅되고 dockur가 Microsoft 다운로드를 시작한 다음에야 파일이 생겼습니다(dockur는 부팅 순간 `custom.iso`를 찾음). 이제 스테이징이 **`winpodx setup` 내부**에서 storage 경로 확정 후 **컨테이너 (재)생성 전**에 일어나, dockur가 ISO를 찾아 설치합니다. `winpodx setup --win-iso <path>`로도 노출.
 - **reverse-open 리스너가 다음 `pod start`까지 죽어있지 않고 앱 실행 시 자가복구됨.** `winpodx pod stop` / 트레이 Quit이 리스너를 멈추는데(`stop_listener()`), pod는 계속 돌고 있으면 watcher를 다시 띄우는 게 없어 Windows의 "연결 프로그램 → Linux 앱"이 조용히 무반응이었습니다. 이제 `ensure_ready`(모든 `winpodx app run` / GUI 실행)가 `reverse_open` 활성 시 리스너를 idempotent하게 보장합니다. v0.7.4 스모크 중 발견.
 
