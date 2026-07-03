@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # winpodx debloat: ads & suggestions (Start menu / lock screen / settings)
 
-Write-Host "[ads] Disabling all known advertising suggestions..."
+Write-Host "[ads] Disabling ContentDeliveryManager + advertising suggestions..."
 
 $adValues = @(
     # Turn off possible File Explorer Ads
