@@ -624,6 +624,14 @@ def build_rdp_command(
         cmd.append(f"/p:{password}")
         password = ""  # signal launch_app to skip stdin write
 
+    # FreeRDP advertises RAIL language/IME synchronization on Linux even though
+    # its X11 client does not implement it completely. Windows then leaves IME
+    # candidate windows stuck after text is committed (#815). Clear only that
+    # capability bit (0x08) from FreeRDP's default 0xff mask; full-desktop RDP
+    # does not use RAIL and must keep its default capabilities.
+    if app_executable or launch_uri:
+        cmd.append("/tune:FreeRDP_RemoteApplicationSupportMask:0xf7")
+
     # RemoteApp (RAIL) launch; requires fDisabledAllowList=1 set by install.bat.
     if launch_uri:
         # UWP/MSIX: launch via the hidden VBS wrapper rather than

@@ -478,6 +478,28 @@ class TestBuildRdpCommand:
         assert any(c.startswith("/app:") for c in cmd)
         assert "/dynamic-resolution" not in cmd
 
+    def test_remoteapp_masks_unimplemented_ime_sync_capability(self, cfg, monkeypatch):
+        # #815 / FreeRDP #8126: advertising RAIL IME sync (bit 0x08) on X11
+        # leaves Chinese IME candidate windows stuck after committing text.
+        monkeypatch.setattr(
+            "winpodx.core.rdp.find_freerdp",
+            lambda *a, **k: ("/usr/bin/xfreerdp3", "xfreerdp"),
+        )
+        monkeypatch.setattr("winpodx.core.rdp.freerdp_major_version", lambda: 3)
+        monkeypatch.setattr("winpodx.display.layout.has_mixed_scale", lambda: False)
+        tune = "/tune:FreeRDP_RemoteApplicationSupportMask:0xf7"
+
+        win32, _ = build_rdp_command(cfg, app_executable="notepad.exe")
+        uwp, _ = build_rdp_command(
+            cfg,
+            launch_uri="Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+        )
+        desktop, _ = build_rdp_command(cfg)
+
+        assert tune in win32
+        assert tune in uwp
+        assert tune not in desktop
+
     def test_span_added_to_app_launch_uniform_scale(self, cfg, monkeypatch):
         # multimon defaults to "span": with uniform monitor scales a RAIL app
         # launch spans the host monitor bounding box so a window dragged to a
