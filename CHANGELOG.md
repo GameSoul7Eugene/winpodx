@@ -9,6 +9,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Changed
+
+- **The tray app launcher now stays current and preserves each app's complete launch configuration.** Visible Windows applications are sorted consistently by launcher tier and name, hidden applications are excluded, and the previous 20-app cap is gone. Tray launches now carry launch URIs, window-class hints, default arguments, app icons, and per-app RDP overrides. The menu refreshes both when opened and on the status timer for desktops such as KDE Plasma that do not reliably emit nested-menu signals; if the app catalogue cannot be read, the last working menu remains available. Behavioural tests cover ordering, filtering, launch metadata, action ownership, and failure-safe rebuilding.
+
+### Contributors
+
+Thanks to @silentone12725 for this contribution.
+
 ## [0.10.4] - 2026-07-27
 
 ### Added
