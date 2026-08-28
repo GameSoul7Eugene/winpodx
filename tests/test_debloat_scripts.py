@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
+
+RegistryValue = tuple[str, str]
 
 DEBLOAT_DIR: Final = Path(__file__).resolve().parents[1] / "scripts" / "windows" / "debloat"
 SAFE_SCHEDULED_TASKS: Final = (
@@ -30,6 +33,32 @@ SAFE_SCHEDULED_TASKS: Final = (
     r"\Microsoft\Windows\WindowsAI\Copilot\CopilotDataCollectionTask",
     r"\Microsoft\Windows\WindowsAI\Insights\InsightsDataCollectionTask",
 )
+PR_ONLY_AD_VALUES: Final = frozenset(
+    {
+        (
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Start",
+            "ShowRecentList",
+        ),
+        (
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\SystemSettings"
+            r"\AccountNotifications",
+            "EnableAccountNotifications",
+        ),
+        (
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
+            "Start_RecoPersonalizedSites",
+        ),
+        (
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\CPSS\Store"
+            r"\TailoredExperiencesWithDiagnosticDataEnabled",
+            "Value",
+        ),
+        (
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
+            "SlideshowEnabled",
+        ),
+    }
+)
 
 
 def _read_script(relative_path: str) -> str:
@@ -38,6 +67,14 @@ def _read_script(relative_path: str) -> str:
 
 def _scheduled_tasks(script: str) -> tuple[str, ...]:
     return tuple(re.findall(r'^\s*"([^"]+)"[,]?\s*$', script, flags=re.MULTILINE))
+
+
+def _registry_values(script: str) -> tuple[RegistryValue, ...]:
+    return tuple(re.findall(r'@\{Path="([^"]+)"; Name="([^"]+)"(?:; Value=[^}]+)?\}', script))
+
+
+def _casefold_values(values: Iterable[RegistryValue]) -> frozenset[RegistryValue]:
+    return frozenset((path.casefold(), name.casefold()) for path, name in values)
 
 
 def test_scheduled_tasks_apply_uses_safe_allowlist() -> None:
@@ -73,3 +110,33 @@ def test_scheduled_tasks_apply_does_not_terminate_running_tasks() -> None:
 
     # Then
     assert "schtasks /end" not in normalized_script
+
+
+def test_ads_scripts_exclude_pr_only_registry_values() -> None:
+    # Given
+    apply_script = _read_script("ads.ps1")
+    undo_script = _read_script("undo/ads.ps1")
+
+    # When
+    apply_values = _casefold_values(_registry_values(apply_script))
+    undo_values = _casefold_values(_registry_values(undo_script))
+    forbidden_values = _casefold_values(PR_ONLY_AD_VALUES)
+
+    # Then
+    assert apply_values
+    assert undo_values
+    assert apply_values.isdisjoint(forbidden_values)
+    assert undo_values.isdisjoint(forbidden_values)
+
+
+def test_ads_undo_matches_apply() -> None:
+    # Given
+    apply_script = _read_script("ads.ps1")
+    undo_script = _read_script("undo/ads.ps1")
+
+    # When
+    apply_values = _registry_values(apply_script)
+    undo_values = _registry_values(undo_script)
+
+    # Then
+    assert undo_values == apply_values

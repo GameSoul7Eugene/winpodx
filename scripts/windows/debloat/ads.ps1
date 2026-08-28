@@ -9,22 +9,14 @@ $adValues = @(
 
     # Don't show (ads) recommendations for tips, shortcuts, new apps, and more on the Start Menu
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="Start_IrisRecommendations"; Value=0},
-	@{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Start"; Name="ShowRecentList"; Value=0},
 
     # Don't show Microsoft account-related notifications on the Start Menu
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="Start_AccountNotifications"; Value=0},
-	
-	# Don't show notifications in the Settings app
-	@{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\SystemSettings\AccountNotifications"; Name="EnableAccountNotifications"; Value=0},
-	
-	# Don't show websites from browsing history
-	@{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="Start_RecoPersonalizedSites"; Value=0},
 
     # Don't suggest ways to get the most out of Windows and finish setting up this device
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement"; Name="ScoobeSystemSettingEnabled"; Value=0},
 
     # Disable "Tailored Experiences"
-	@{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\CPSS\Store\TailoredExperiencesWithDiagnosticDataEnabled"; Name="Value"; Value=0},
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy"; Name="TailoredExperiencesWithDiagnosticDataEnabled"; Value=0},
 
     # Turn off notification suggestions like: "We noticed you haven't opened these apps in a while."
@@ -64,8 +56,7 @@ $adValues = @(
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name="SilentInstalledAppsEnabled"; Value=0},
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name="SystemPaneSuggestionsEnabled"; Value=0},
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name="SoftLandingEnabled"; Value=0},
-    @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name="RotatingLockScreenEnabled"; Value=0},
-	@{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name="SlideshowEnabled"; Value=0}
+    @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name="RotatingLockScreenEnabled"; Value=0}
 )
 
 foreach ($item in $adValues) {
