@@ -59,6 +59,23 @@ PR_ONLY_AD_VALUES: Final = frozenset(
         ),
     }
 )
+TASKBAR_WIDGET_VALUE: Final = (
+    r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
+    "TaskbarDa",
+)
+PR_ONLY_WIDGET_VALUES: Final = frozenset(
+    {
+        (
+            r"HKLM:\Software\Policies\Microsoft\Windows\Windows Feeds",
+            "EnableFeeds",
+        ),
+        (
+            r"HKLM:\Software\Microsoft\PolicyManager\default\NewsAndInterests"
+            r"\AllowNewsAndInterests",
+            "value",
+        ),
+    }
+)
 
 
 def _read_script(relative_path: str) -> str:
@@ -140,3 +157,45 @@ def test_ads_undo_matches_apply() -> None:
 
     # Then
     assert undo_values == apply_values
+
+
+def test_widgets_scripts_exclude_pr_only_registry_values() -> None:
+    # Given
+    apply_script = _read_script("widgets.ps1")
+    undo_script = _read_script("undo/widgets.ps1")
+
+    # When
+    apply_values = _casefold_values(_registry_values(apply_script))
+    undo_values = _casefold_values(_registry_values(undo_script))
+    forbidden_values = _casefold_values(PR_ONLY_WIDGET_VALUES)
+
+    # Then
+    assert apply_values
+    assert undo_values
+    assert apply_values.isdisjoint(forbidden_values)
+    assert undo_values.isdisjoint(forbidden_values)
+
+
+def test_widgets_undo_matches_apply_except_taskbar_icon() -> None:
+    # Given
+    apply_script = _read_script("widgets.ps1")
+    undo_script = _read_script("undo/widgets.ps1")
+
+    # When
+    apply_values = set(_registry_values(apply_script))
+    undo_values = set(_registry_values(undo_script))
+
+    # Then
+    assert undo_values == apply_values - {TASKBAR_WIDGET_VALUE}
+
+
+def test_widgets_do_not_write_internal_policy_manager_defaults() -> None:
+    # Given
+    apply_script = _read_script("widgets.ps1")
+    undo_script = _read_script("undo/widgets.ps1")
+
+    # When
+    scripts = (apply_script + undo_script).casefold()
+
+    # Then
+    assert "\\policymanager\\default\\" not in scripts

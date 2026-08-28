@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# winpodx debloat UNDO: widgets / taskbar news panel
+# winpodx debloat UNDO: Widgets / news panel.
 
 Write-Host "[widgets] Restoring widgets / taskbar news panel..."
 
@@ -11,11 +11,7 @@ $widgetValues = @(
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Feeds"; Name="EnShellFeedsTaskbarViewMode"},
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Feeds"; Name="ShellFeedsTaskbarPreviousViewMode"},
     @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Feeds"; Name="ShellFeedsTaskbarContentUpdateMode"},
-    @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Feeds"; Name="ShellFeedsTaskbarOpenOnHover"},
-	
-	# Misc
-	@{Path="HKLM:\Software\Policies\Microsoft\Windows\Windows Feeds"; Name="EnableFeeds"},
-	@{Path="HKLM:\Software\Microsoft\PolicyManager\default\NewsAndInterests\AllowNewsAndInterests"; Name="value"}
+    @{Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Feeds"; Name="ShellFeedsTaskbarOpenOnHover"}
 )
 
 foreach ($item in $widgetValues) {
